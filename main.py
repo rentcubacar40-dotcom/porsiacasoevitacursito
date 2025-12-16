@@ -14,14 +14,17 @@ import youtube
 import NexCloudClient
 
 from pydownloader.downloader import Downloader
-from ProxyCloud import ProxyCloud
-import ProxyCloud
 import socket
 import S5Crypto
 import traceback
 import random
 import pytz
 import threading
+import json
+import ssl
+import urllib3
+from urllib.parse import urlparse
+import requests
 
 # CONFIGURACIÓN FIJA EN EL CÓDIGO
 BOT_TOKEN = "8410047906:AAGntGHmkIuIvovBMQfy-gko2JTw3TNJsak"
@@ -45,7 +48,7 @@ PRE_CONFIGURATED_USERS = {
         "moodle_password": "Kevin10.",
         "zips": 1023,
         "uploadtype": "evidence",
-        "proxy": "",
+        "proxy": "",  # Inicialmente sin proxy
         "tokenize": 0
     },
     "Emanuel14APK,gatitoo_miauu,maykolguille": {
@@ -56,10 +59,573 @@ PRE_CONFIGURATED_USERS = {
         "moodle_password": "Rulebreaker2316",
         "zips": 99,
         "uploadtype": "evidence",
-        "proxy": "",
+        "proxy": "",  # Inicialmente sin proxy
         "tokenize": 0
     }
 }
+
+# ============================================
+# SISTEMA DE ESTADÍSTICAS PERSISTENTE EN JSON
+# ============================================
+
+class PersistentStats:
+    """Sistema de estadísticas persistente usando archivo JSON"""
+    
+    def __init__(self, filename='bot_stats.json'):
+        self.filename = filename
+        self.data = self.load_data()
+    
+    def load_data(self):
+        """Carga datos desde archivo JSON"""
+        try:
+            if os.path.exists(self.filename):
+                with open(self.filename, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"Error cargando estadísticas: {e}")
+        
+        # Estructura inicial si no existe el archivo
+        return {
+            'created_at': self.get_current_timestamp(),
+            'last_update': self.get_current_timestamp(),
+            'total_uploads': 0,
+            'total_deletes': 0,
+            'total_size_uploaded': 0,  # en bytes
+            'daily_stats': {},  # Estadísticas por día
+            'user_stats': {},   # Estadísticas por usuario
+            'upload_logs': [],  # Historial de subidas
+            'delete_logs': []   # Historial de eliminaciones
+        }
+    
+    def save_data(self):
+        """Guarda datos al archivo JSON"""
+        try:
+            self.data['last_update'] = self.get_current_timestamp()
+            with open(self.filename, 'w', encoding='utf-8') as f:
+                json.dump(self.data, f, indent=2, ensure_ascii=False)
+            return True
+        except Exception as e:
+            print(f"Error guardando estadísticas: {e}")
+            return False
+    
+    def get_current_timestamp(self):
+        """Obtiene timestamp actual formateado"""
+        dt = get_cuba_time()
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    
+    def get_today_key(self):
+        """Obtiene la clave para el día actual (ej: '2024-12-16')"""
+        dt = get_cuba_time()
+        return dt.strftime("%Y-%m-%d")
+    
+    def get_current_datetime_display(self):
+        """Obtiene fecha/hora para mostrar"""
+        return format_cuba_datetime()
+    
+    def log_upload(self, username, filename, file_size, moodle_host):
+        """Registra una subida exitosa"""
+        try:
+            file_size = int(file_size)
+        except:
+            file_size = 0
+        
+        today = self.get_today_key()
+        timestamp = self.get_current_timestamp()
+        display_time = self.get_current_datetime_display()
+        
+        # Actualizar estadísticas globales
+        self.data['total_uploads'] += 1
+        self.data['total_size_uploaded'] += file_size
+        
+        # Actualizar estadísticas del día
+        if today not in self.data['daily_stats']:
+            self.data['daily_stats'][today] = {
+                'date': today,
+                'uploads': 0,
+                'deletes': 0,
+                'total_size': 0,
+                'users': {}
+            }
+        
+        self.data['daily_stats'][today]['uploads'] += 1
+        self.data['daily_stats'][today]['total_size'] += file_size
+        
+        # Actualizar usuario en estadísticas del día
+        if username not in self.data['daily_stats'][today]['users']:
+            self.data['daily_stats'][today]['users'][username] = {
+                'uploads': 0,
+                'deletes': 0,
+                'total_size': 0
+            }
+        
+        self.data['daily_stats'][today]['users'][username]['uploads'] += 1
+        self.data['daily_stats'][today]['users'][username]['total_size'] += file_size
+        
+        # Actualizar estadísticas del usuario (globales)
+        if username not in self.data['user_stats']:
+            self.data['user_stats'][username] = {
+                'uploads': 0,
+                'deletes': 0,
+                'total_size': 0,
+                'first_activity': timestamp,
+                'last_activity': timestamp,
+                'last_activity_display': display_time
+            }
+        
+        self.data['user_stats'][username]['uploads'] += 1
+        self.data['user_stats'][username]['total_size'] += file_size
+        self.data['user_stats'][username]['last_activity'] = timestamp
+        self.data['user_stats'][username]['last_activity_display'] = display_time
+        
+        # Registrar en logs
+        log_entry = {
+            'timestamp': timestamp,
+            'display_time': display_time,
+            'username': username,
+            'filename': filename,
+            'file_size_bytes': file_size,
+            'file_size_formatted': format_file_size(file_size),
+            'moodle_host': moodle_host,
+            'date_key': today
+        }
+        self.data['upload_logs'].append(log_entry)
+        
+        # Mantener solo últimos 500 logs para no hacer el archivo muy grande
+        if len(self.data['upload_logs']) > 500:
+            self.data['upload_logs'].pop(0)
+        
+        # Guardar cambios
+        self.save_data()
+        return True
+    
+    def log_delete(self, username, filename, evidence_name, moodle_host):
+        """Registra una eliminación individual"""
+        today = self.get_today_key()
+        timestamp = self.get_current_timestamp()
+        display_time = self.get_current_datetime_display()
+        
+        # Actualizar estadísticas globales
+        self.data['total_deletes'] += 1
+        
+        # Actualizar estadísticas del día
+        if today not in self.data['daily_stats']:
+            self.data['daily_stats'][today] = {
+                'date': today,
+                'uploads': 0,
+                'deletes': 0,
+                'total_size': 0,
+                'users': {}
+            }
+        
+        self.data['daily_stats'][today]['deletes'] += 1
+        
+        # Actualizar usuario en estadísticas del día
+        if username not in self.data['daily_stats'][today]['users']:
+            self.data['daily_stats'][today]['users'][username] = {
+                'uploads': 0,
+                'deletes': 0,
+                'total_size': 0
+            }
+        
+        self.data['daily_stats'][today]['users'][username]['deletes'] += 1
+        
+        # Actualizar estadísticas del usuario (globales)
+        if username not in self.data['user_stats']:
+            self.data['user_stats'][username] = {
+                'uploads': 0,
+                'deletes': 0,
+                'total_size': 0,
+                'first_activity': timestamp,
+                'last_activity': timestamp,
+                'last_activity_display': display_time
+            }
+        
+        self.data['user_stats'][username]['deletes'] += 1
+        self.data['user_stats'][username]['last_activity'] = timestamp
+        self.data['user_stats'][username]['last_activity_display'] = display_time
+        
+        # Registrar en logs
+        log_entry = {
+            'timestamp': timestamp,
+            'display_time': display_time,
+            'username': username,
+            'filename': filename,
+            'evidence_name': evidence_name,
+            'moodle_host': moodle_host,
+            'type': 'delete',
+            'date_key': today
+        }
+        self.data['delete_logs'].append(log_entry)
+        
+        # Mantener solo últimos 500 logs
+        if len(self.data['delete_logs']) > 500:
+            self.data['delete_logs'].pop(0)
+        
+        # Guardar cambios
+        self.save_data()
+        return True
+    
+    def log_delete_all(self, username, deleted_evidences, deleted_files, moodle_host):
+        """Registra eliminación masiva"""
+        today = self.get_today_key()
+        timestamp = self.get_current_timestamp()
+        display_time = self.get_current_datetime_display()
+        
+        # Actualizar estadísticas globales
+        self.data['total_deletes'] += deleted_files
+        
+        # Actualizar estadísticas del día
+        if today not in self.data['daily_stats']:
+            self.data['daily_stats'][today] = {
+                'date': today,
+                'uploads': 0,
+                'deletes': 0,
+                'total_size': 0,
+                'users': {}
+            }
+        
+        self.data['daily_stats'][today]['deletes'] += deleted_files
+        
+        # Actualizar usuario en estadísticas del día
+        if username not in self.data['daily_stats'][today]['users']:
+            self.data['daily_stats'][today]['users'][username] = {
+                'uploads': 0,
+                'deletes': 0,
+                'total_size': 0
+            }
+        
+        self.data['daily_stats'][today]['users'][username]['deletes'] += deleted_files
+        
+        # Actualizar estadísticas del usuario (globales)
+        if username not in self.data['user_stats']:
+            self.data['user_stats'][username] = {
+                'uploads': 0,
+                'deletes': 0,
+                'total_size': 0,
+                'first_activity': timestamp,
+                'last_activity': timestamp,
+                'last_activity_display': display_time
+            }
+        
+        self.data['user_stats'][username]['deletes'] += deleted_files
+        self.data['user_stats'][username]['last_activity'] = timestamp
+        self.data['user_stats'][username]['last_activity_display'] = display_time
+        
+        # Registrar en logs
+        log_entry = {
+            'timestamp': timestamp,
+            'display_time': display_time,
+            'username': username,
+            'action': 'delete_all',
+            'deleted_evidences': deleted_evidences,
+            'deleted_files': deleted_files,
+            'moodle_host': moodle_host,
+            'type': 'delete_all',
+            'date_key': today
+        }
+        self.data['delete_logs'].append(log_entry)
+        
+        # Mantener solo últimos 500 logs
+        if len(self.data['delete_logs']) > 500:
+            self.data['delete_logs'].pop(0)
+        
+        # Guardar cambios
+        self.save_data()
+        return True
+    
+    def get_user_stats(self, username):
+        """Obtiene estadísticas de un usuario"""
+        if username in self.data['user_stats']:
+            return self.data['user_stats'][username]
+        return None
+    
+    def get_all_stats(self):
+        """Obtiene todas las estadísticas globales"""
+        return {
+            'total_uploads': self.data['total_uploads'],
+            'total_deletes': self.data['total_deletes'],
+            'total_size_uploaded': self.data['total_size_uploaded'],
+            'created_at': self.data['created_at'],
+            'last_update': self.data['last_update'],
+            'total_days': len(self.data['daily_stats'])
+        }
+    
+    def get_all_users(self):
+        """Obtiene todos los usuarios"""
+        return self.data['user_stats']
+    
+    def get_recent_uploads(self, limit=10):
+        """Obtiene subidas recientes"""
+        logs = self.data['upload_logs']
+        return logs[-limit:][::-1] if logs else []
+    
+    def get_recent_deletes(self, limit=10):
+        """Obtiene eliminaciones recientes"""
+        logs = self.data['delete_logs']
+        return logs[-limit:][::-1] if logs else []
+    
+    def get_daily_stats(self, date_key=None):
+        """Obtiene estadísticas de un día específico o del último día"""
+        if not self.data['daily_stats']:
+            return None
+        
+        if date_key:
+            return self.data['daily_stats'].get(date_key)
+        else:
+            # Obtener el último día
+            sorted_dates = sorted(self.data['daily_stats'].keys(), reverse=True)
+            if sorted_dates:
+                return self.data['daily_stats'][sorted_dates[0]]
+        return None
+    
+    def get_all_daily_stats(self):
+        """Obtiene todas las estadísticas diarias"""
+        return self.data['daily_stats']
+    
+    def has_any_data(self):
+        """Verifica si hay datos"""
+        return len(self.data['upload_logs']) > 0 or len(self.data['delete_logs']) > 0
+    
+    def clear_all_data(self):
+        """Limpia todos los datos (pero mantiene el archivo)"""
+        # Guardar solo información básica
+        self.data = {
+            'created_at': self.get_current_timestamp(),
+            'last_update': self.get_current_timestamp(),
+            'total_uploads': 0,
+            'total_deletes': 0,
+            'total_size_uploaded': 0,
+            'daily_stats': {},
+            'user_stats': {},
+            'upload_logs': [],
+            'delete_logs': []
+        }
+        self.save_data()
+        return "✅ Todos los datos han sido eliminados (se creó nuevo archivo)"
+    
+    def get_stats_summary(self):
+        """Obtiene un resumen completo de estadísticas"""
+        total_days = len(self.data['daily_stats'])
+        total_users = len(self.data['user_stats'])
+        
+        # Calcular promedio por día
+        avg_uploads = self.data['total_uploads'] / total_days if total_days > 0 else 0
+        avg_deletes = self.data['total_deletes'] / total_days if total_days > 0 else 0
+        
+        return {
+            'total_days': total_days,
+            'total_users': total_users,
+            'avg_uploads_per_day': round(avg_uploads, 1),
+            'avg_deletes_per_day': round(avg_deletes, 1)
+        }
+
+# Instancia global de estadísticas
+persistent_stats = PersistentStats()
+
+# ============================================
+# SISTEMA DE PROXY MEJORADO CON SOPORTE HTTPS
+# ============================================
+
+class ProxyManager:
+    """Manejador de proxies integrado con soporte HTTPS."""
+    
+    @staticmethod
+    def parse_proxy(proxy_text):
+        """
+        Parsea un string de proxy.
+        Formatos soportados:
+        1. socks5://usuario:contraseña@ip:puerto
+        2. socks5://ip:puerto
+        3. http://usuario:contraseña@ip:puerto
+        4. http://ip:puerto
+        5. https://usuario:contraseña@ip:puerto  ← NUEVO
+        6. https://ip:puerto                      ← NUEVO
+        7. ip:puerto (asume socks5)
+        """
+        if not proxy_text or not isinstance(proxy_text, str):
+            return None
+        
+        proxy_text = proxy_text.strip()
+        if not proxy_text:
+            return None
+        
+        try:
+            proxy_type = 'socks5'
+            username = None
+            password = None
+            ip = None
+            port = None
+            
+            # Si tiene ://, extraer el tipo
+            if '://' in proxy_text:
+                parts = proxy_text.split('://', 1)
+                proxy_type = parts[0].lower()
+                rest = parts[1]
+            else:
+                rest = proxy_text
+            
+            # Manejar autenticación
+            if '@' in rest:
+                auth_part, server_part = rest.split('@', 1)
+                if ':' in auth_part:
+                    username, password = auth_part.split(':', 1)
+                else:
+                    username = auth_part
+            else:
+                server_part = rest
+            
+            # Extraer IP y puerto
+            if ':' in server_part:
+                ip_port_parts = server_part.split(':')
+                ip = ip_port_parts[0]
+                if len(ip_port_parts) >= 2 and ip_port_parts[1].isdigit():
+                    port = int(ip_port_parts[1])
+                else:
+                    # Puertos por defecto según el tipo de proxy
+                    if proxy_type == 'socks5':
+                        port = 1080
+                    elif proxy_type == 'http':
+                        port = 8080
+                    elif proxy_type == 'https':
+                        port = 443
+                    else:
+                        port = 1080
+            else:
+                ip = server_part
+                # Puertos por defecto
+                if proxy_type == 'socks5':
+                    port = 1080
+                elif proxy_type == 'http':
+                    port = 8080
+                elif proxy_type == 'https':
+                    port = 443
+                else:
+                    port = 1080
+            
+            if not ip:
+                return None
+            
+            # Construir URL del proxy según el tipo
+            if username and password:
+                if proxy_type == 'https':
+                    # Para HTTPS proxy, usar autenticación básica en URL
+                    proxy_url = f"https://{username}:{password}@{ip}:{port}"
+                else:
+                    proxy_url = f"{proxy_type}://{username}:{password}@{ip}:{port}"
+            else:
+                proxy_url = f"{proxy_type}://{ip}:{port}"
+            
+            # Para proxies HTTP/HTTPS, necesitamos configurar ambos
+            if proxy_type == 'http':
+                return {
+                    'http': proxy_url,
+                    'https': proxy_url,  # HTTP proxy también maneja HTTPS
+                    'original': proxy_text,
+                    'type': proxy_type,
+                    'ip': ip,
+                    'port': port,
+                    'username': username,
+                    'has_auth': username is not None
+                }
+            elif proxy_type == 'https':
+                # Proxy HTTPS específico
+                return {
+                    'http': proxy_url.replace('https://', 'http://'),  # Fallback a HTTP
+                    'https': proxy_url,
+                    'original': proxy_text,
+                    'type': proxy_type,
+                    'ip': ip,
+                    'port': port,
+                    'username': username,
+                    'has_auth': username is not None
+                }
+            else:  # socks5
+                return {
+                    'http': f'socks5://{ip}:{port}',
+                    'https': f'socks5://{ip}:{port}',
+                    'original': proxy_text,
+                    'type': proxy_type,
+                    'ip': ip,
+                    'port': port,
+                    'username': username,
+                    'has_auth': username is not None
+                }
+                
+        except Exception as e:
+            print(f"Error parseando proxy: {e}")
+            return None
+    
+    @staticmethod
+    def format_proxy_for_display(proxy_info):
+        """Formatea la información del proxy para mostrar."""
+        if not proxy_info:
+            return "No configurado"
+        
+        display = f"🔧 {proxy_info['type'].upper()}: {proxy_info['ip']}:{proxy_info['port']}"
+        if proxy_info['username']:
+            display += f"\n👤 Usuario: {proxy_info['username']}"
+            display += "\n🔑 Con contraseña: Sí"
+        return display
+    
+    @staticmethod
+    def get_proxy_for_requests(proxy_text):
+        """Convierte texto de proxy a formato para requests."""
+        if not proxy_text:
+            return {}
+        
+        proxy_info = ProxyManager.parse_proxy(proxy_text)
+        if not proxy_info:
+            return {}
+        
+        # Devolver solo las URLs para requests
+        return {
+            'http': proxy_info['http'],
+            'https': proxy_info['https']
+        }
+    
+    @staticmethod
+    def test_proxy(proxy_text):
+        """Testea si un proxy funciona."""
+        if not proxy_text:
+            return False, "No se proporcionó proxy"
+        
+        try:
+            proxy_dict = ProxyManager.get_proxy_for_requests(proxy_text)
+            if not proxy_dict:
+                return False, "Formato de proxy inválido"
+            
+            # Intentar conectar a un sitio de prueba
+            test_url = "http://httpbin.org/ip"
+            timeout = 10
+            
+            response = requests.get(
+                test_url, 
+                proxies=proxy_dict,
+                timeout=timeout,
+                verify=False  # Desactivar verificación SSL para testing
+            )
+            
+            if response.status_code == 200:
+                # Verificar que estamos usando el proxy
+                data = response.json()
+                if 'origin' in data:
+                    return True, f"✅ Proxy funcionando\nIP detectada: {data['origin']}"
+                return True, "✅ Proxy funcionando"
+            else:
+                return False, f"❌ Error HTTP {response.status_code}"
+                
+        except requests.exceptions.ConnectTimeout:
+            return False, "❌ Timeout de conexión"
+        except requests.exceptions.ProxyError:
+            return False, "❌ Error de proxy (no se pudo conectar)"
+        except requests.exceptions.SSLError:
+            return False, "❌ Error SSL (proxy HTTPS puede requerir certificados)"
+        except Exception as e:
+            return False, f"❌ Error: {str(e)}"
+
+# ============================================
+# FUNCIONES AUXILIARES
+# ============================================
 
 def get_cuba_time():
     if CUBA_TZ:
@@ -76,7 +642,7 @@ def format_cuba_date(dt=None):
 def format_cuba_datetime(dt=None):
     if dt is None:
         dt = get_cuba_time()
-    return dt.strftime("%d/%m/%y %I:%M %p")  # ← %I para 12 horas, %p para AM/PM
+    return dt.strftime("%d/%m/%y %I:%M %p")
 
 def format_file_size(size_bytes):
     """Formatea bytes a KB, MB o GB automáticamente"""
@@ -88,173 +654,6 @@ def format_file_size(size_bytes):
         return f"{size_bytes / (1024 * 1024):.1f} MB"
     else:
         return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
-
-# ==============================
-# SISTEMA DE ESTADÍSTICAS EN MEMORIA
-# ==============================
-
-class MemoryStats:
-    """Sistema de estadísticas en memoria (sin archivos)"""
-    
-    def __init__(self):
-        # Reiniciar todo al iniciar
-        self.reset_stats()
-    
-    def reset_stats(self):
-        """Reinicia todas las estadísticas"""
-        self.stats = {
-            'total_uploads': 0,
-            'total_deletes': 0,
-            'total_size_uploaded': 0  # en bytes
-        }
-        self.user_stats = {}  # username -> {uploads, deletes, total_size, last_activity}
-        self.upload_logs = []  # {timestamp, username, filename, file_size_bytes, file_size_formatted, moodle_host}
-        self.delete_logs = []  # {timestamp, username, filename, evidence_name, moodle_host, type}
-    
-    def log_upload(self, username, filename, file_size, moodle_host):
-        """Registra una subida exitosa"""
-        try:
-            file_size = int(file_size)
-        except:
-            file_size = 0
-        
-        # Actualizar estadísticas globales
-        self.stats['total_uploads'] += 1
-        self.stats['total_size_uploaded'] += file_size
-        
-        # Actualizar estadísticas del usuario
-        if username not in self.user_stats:
-            self.user_stats[username] = {
-                'uploads': 0,
-                'deletes': 0,
-                'total_size': 0,
-                'last_activity': format_cuba_datetime()
-            }
-        
-        self.user_stats[username]['uploads'] += 1
-        self.user_stats[username]['total_size'] += file_size
-        self.user_stats[username]['last_activity'] = format_cuba_datetime()
-        
-        # Registrar en logs
-        log_entry = {
-            'timestamp': format_cuba_datetime(),
-            'username': username,
-            'filename': filename,
-            'file_size_bytes': file_size,
-            'file_size_formatted': format_file_size(file_size),
-            'moodle_host': moodle_host
-        }
-        self.upload_logs.append(log_entry)
-        
-        # Mantener solo últimos 100 logs
-        if len(self.upload_logs) > 100:
-            self.upload_logs.pop(0)
-        
-        return True
-    
-    def log_delete(self, username, filename, evidence_name, moodle_host):
-        """Registra una eliminación individual"""
-        # Actualizar estadísticas globales
-        self.stats['total_deletes'] += 1
-        
-        # Actualizar estadísticas del usuario
-        if username not in self.user_stats:
-            self.user_stats[username] = {
-                'uploads': 0,
-                'deletes': 0,
-                'total_size': 0,
-                'last_activity': format_cuba_datetime()
-            }
-        
-        self.user_stats[username]['deletes'] += 1
-        self.user_stats[username]['last_activity'] = format_cuba_datetime()
-        
-        # Registrar en logs
-        log_entry = {
-            'timestamp': format_cuba_datetime(),
-            'username': username,
-            'filename': filename,
-            'evidence_name': evidence_name,
-            'moodle_host': moodle_host,
-            'type': 'delete'
-        }
-        self.delete_logs.append(log_entry)
-        
-        # Mantener solo últimos 100 logs
-        if len(self.delete_logs) > 100:
-            self.delete_logs.pop(0)
-        
-        return True
-    
-    def log_delete_all(self, username, deleted_evidences, deleted_files, moodle_host):
-        """Registra eliminación masiva - CORREGIDO: cuenta todos los archivos"""
-        # Actualizar estadísticas globales - contar CADA ARCHIVO eliminado
-        self.stats['total_deletes'] += deleted_files  # ¡Sumar todos los archivos, no solo 1!
-        
-        # Actualizar estadísticas del usuario
-        if username not in self.user_stats:
-            self.user_stats[username] = {
-                'uploads': 0,
-                'deletes': 0,
-                'total_size': 0,
-                'last_activity': format_cuba_datetime()
-            }
-        
-        # ¡IMPORTANTE! Sumar TODOS los archivos eliminados, no solo 1
-        self.user_stats[username]['deletes'] += deleted_files
-        self.user_stats[username]['last_activity'] = format_cuba_datetime()
-        
-        # Registrar en logs
-        log_entry = {
-            'timestamp': format_cuba_datetime(),
-            'username': username,
-            'action': 'delete_all',
-            'deleted_evidences': deleted_evidences,
-            'deleted_files': deleted_files,
-            'moodle_host': moodle_host,
-            'type': 'delete_all'
-        }
-        self.delete_logs.append(log_entry)
-        
-        # Mantener solo últimos 100 logs
-        if len(self.delete_logs) > 100:
-            self.delete_logs.pop(0)
-        
-        return True
-    
-    def get_user_stats(self, username):
-        """Obtiene estadísticas de un usuario"""
-        if username in self.user_stats:
-            return self.user_stats[username]
-        return None
-    
-    def get_all_stats(self):
-        """Obtiene todas las estadísticas globales"""
-        return self.stats
-    
-    def get_all_users(self):
-        """Obtiene todos los usuarios"""
-        return self.user_stats
-    
-    def get_recent_uploads(self, limit=10):
-        """Obtiene subidas recientes"""
-        return self.upload_logs[-limit:][::-1] if self.upload_logs else []
-    
-    def get_recent_deletes(self, limit=10):
-        """Obtiene eliminaciones recientes"""
-        return self.delete_logs[-limit:][::-1] if self.delete_logs else []
-    
-    def has_any_data(self):
-        """Verifica si hay datos"""
-        return len(self.upload_logs) > 0 or len(self.delete_logs) > 0
-    
-    def clear_all_data(self):
-        """Limpia todos los datos"""
-        self.reset_stats()
-        return "✅ Todos los datos han sido eliminados"
-
-# Instancia global de estadísticas
-memory_stats = MemoryStats()
 
 def get_random_large_file_message():
     """Retorna un mensaje chistoso aleatorio para archivos grandes"""
@@ -315,7 +714,11 @@ def processUploadFiles(filename,filesize,files,update,bot,message,thread=None,jd
         evidence = None
         fileid = None
         user_info = jdb.get_user(update.message.sender.username)
-        proxy = ProxyCloud.parse(user_info['proxy'])
+        
+        # OBTENER PROXY USANDO EL NUEVO SISTEMA
+        proxy = {}
+        if user_info.get('proxy'):
+            proxy = ProxyManager.get_proxy_for_requests(user_info['proxy'])
         
         client = MoodleClient(user_info['moodle_user'],
                               user_info['moodle_password'],
@@ -393,7 +796,11 @@ def processFile(update,bot,message,file,thread=None,jdb=None):
         evidname = str(file).split('.')[0]
         txtname = evidname + '.txt'
         try:
-            proxy = ProxyCloud.parse(getUser['proxy'])
+            # OBTENER PROXY USANDO EL NUEVO SISTEMA
+            proxy = {}
+            if getUser.get('proxy'):
+                proxy = ProxyManager.get_proxy_for_requests(getUser['proxy'])
+            
             moodle_client = MoodleClient(getUser['moodle_user'],
                                          getUser['moodle_password'],
                                          getUser['moodle_host'],
@@ -432,10 +839,10 @@ def processFile(update,bot,message,file,thread=None,jdb=None):
         filesInfo = infos.createFileMsg(file,files)
         bot.sendMessage(message.chat.id,finishInfo+'\n'+filesInfo,parse_mode='html')
         
-        # REGISTRAR SUBIDA EN MEMORIA
+        # REGISTRAR SUBIDA EN ESTADÍSTICAS PERSISTENTES
         username = update.message.sender.username
         filename_clean = os.path.basename(file)
-        memory_stats.log_upload(
+        persistent_stats.log_upload(
             username=username,
             filename=filename_clean,
             file_size=file_size,
@@ -561,9 +968,105 @@ def onmessage(update,bot:ObigramClient):
         message = bot.sendMessage(update.message.chat.id,'➲ Procesando ✪ ●●○')
         thread.store('msg',message)
 
+        # NUEVO COMANDO: /proxy - PARA CONFIGURAR PROXY DINÁMICAMENTE
+        if '/proxy' in msgText:
+            try:
+                if msgText.strip() == '/proxy':
+                    # Mostrar proxy actual
+                    current_proxy = user_info.get('proxy', '')
+                    if current_proxy:
+                        proxy_info = ProxyManager.parse_proxy(current_proxy)
+                        if proxy_info:
+                            display = ProxyManager.format_proxy_for_display(proxy_info)
+                            response = f"🔧 PROXY ACTUAL:\n{display}\n\n"
+                        else:
+                            response = f"🔧 PROXY ACTUAL:\n{current_proxy}\n\n"
+                    else:
+                        response = "🔧 PROXY ACTUAL: No configurado\n\n"
+                    
+                    response += "📝 USO:\n"
+                    response += "/proxy - Ver proxy actual\n"
+                    response += "/proxy socks5://ip:puerto - Establecer SOCKS5\n"
+                    response += "/proxy socks5://user:pass@ip:puerto - SOCKS5 con auth\n"
+                    response += "/proxy http://ip:puerto - Establecer HTTP\n"
+                    response += "/proxy https://ip:puerto - Establecer HTTPS (nuevo) ✨\n"
+                    response += "/proxy test - Probar proxy actual\n"
+                    response += "/proxy off - Eliminar proxy\n\n"
+                    response += "📌 EJEMPLOS:\n"
+                    response += "/proxy socks5://127.0.0.1:1080\n"
+                    response += "/proxy socks5://usuario:contraseña@192.168.1.1:1080\n"
+                    response += "/proxy http://proxy.com:8080\n"
+                    response += "/proxy https://secure-proxy.com:443"
+                    
+                    bot.editMessageText(message, response)
+                    
+                elif '/proxy test' in msgText.lower():
+                    # Probar proxy actual
+                    current_proxy = user_info.get('proxy', '')
+                    if not current_proxy:
+                        bot.editMessageText(message, "❌ No hay proxy configurado para probar")
+                        return
+                    
+                    bot.editMessageText(message, "🔍 Probando conexión del proxy...")
+                    success, result = ProxyManager.test_proxy(current_proxy)
+                    bot.editMessageText(message, result)
+                    
+                elif '/proxy off' in msgText.lower():
+                    # Eliminar proxy
+                    user_info['proxy'] = ''
+                    jdb.save_data_user(username, user_info)
+                    jdb.save()
+                    bot.editMessageText(message, '✅ Proxy eliminado exitosamente')
+                    
+                else:
+                    # Establecer nuevo proxy
+                    # Extraer el texto del proxy después de /proxy
+                    proxy_text = msgText[6:].strip()  # Quita '/proxy'
+                    
+                    # Si todavía tiene espacios, tomar solo la primera parte
+                    if ' ' in proxy_text:
+                        # Si es "test", ya lo manejamos arriba
+                        if proxy_text.split(' ')[0].lower() == 'test':
+                            return
+                        proxy_text = proxy_text.split(' ')[0]
+                    
+                    if proxy_text:
+                        # Validar el formato del proxy
+                        proxy_info = ProxyManager.parse_proxy(proxy_text)
+                        
+                        if proxy_info:
+                            user_info['proxy'] = proxy_text
+                            jdb.save_data_user(username, user_info)
+                            jdb.save()
+                            
+                            display = ProxyManager.format_proxy_for_display(proxy_info)
+                            bot.editMessageText(message, f'✅ Proxy configurado exitosamente\n\n{display}\n\n💡 Usa /proxy test para probarlo')
+                        else:
+                            bot.editMessageText(message, '❌ Formato de proxy inválido\n\nFormatos soportados:\n• socks5://ip:puerto\n• socks5://user:pass@ip:puerto\n• http://ip:puerto\n• https://ip:puerto ✨\n• ip:puerto (asume SOCKS5)')
+                    else:
+                        bot.editMessageText(message, '❌ Debes especificar un proxy\n\nEjemplo: /proxy socks5://127.0.0.1:1080')
+                        
+            except Exception as e:
+                print(f"Error en comando proxy: {e}")
+                bot.editMessageText(message, f'❌ Error al configurar proxy: {str(e)}')
+            return
+
         # COMANDO MYSTATS PARA TODOS LOS USUARIOS
         if '/mystats' in msgText:
-            user_stats = memory_stats.get_user_stats(username)
+            user_stats = persistent_stats.get_user_stats(username)
+            all_stats = persistent_stats.get_all_stats()
+            
+            # Obtener información del proxy actual
+            proxy_info = ""
+            if user_info.get('proxy'):
+                proxy_parsed = ProxyManager.parse_proxy(user_info['proxy'])
+                if proxy_parsed:
+                    proxy_info = f"\n🔧 Proxy: {proxy_parsed['type'].upper()} {proxy_parsed['ip']}:{proxy_parsed['port']}"
+                else:
+                    proxy_info = f"\n🔧 Proxy: {user_info['proxy']}"
+            else:
+                proxy_info = "\n🔧 Proxy: No configurado"
+            
             if user_stats:
                 total_size_formatted = format_file_size(user_stats['total_size'])
                 
@@ -574,13 +1077,14 @@ def onmessage(update,bot:ObigramClient):
 📤 Archivos subidos: {user_stats['uploads']}
 🗑️ Archivos eliminados: {user_stats['deletes']}
 💾 Espacio total usado: {total_size_formatted}
-📅 Última actividad: {user_stats['last_activity']}
-🔗 Nube: {user_info['moodle_host']}
+📅 Primera actividad: {user_stats.get('first_activity', 'N/A')}
+📅 Última actividad: {user_stats.get('last_activity_display', 'N/A')}
+🔗 Nube: {user_info['moodle_host']}{proxy_info}
 ━━━━━━━━━━━━━━━━━━━
-📈 Resumen:
-• Subiste {user_stats['uploads']} archivo(s)
-• Eliminaste {user_stats['deletes']} archivo(s)
-• Usaste {total_size_formatted} de espacio
+📈 Resumen global:
+• Total días registrados: {all_stats.get('total_days', 0)}
+• Total subidas bot: {all_stats.get('total_uploads', 0)}
+• Total eliminaciones: {all_stats.get('total_deletes', 0)}
                 """
             else:
                 stats_msg = f"""
@@ -590,8 +1094,9 @@ def onmessage(update,bot:ObigramClient):
 📤 Archivos subidos: 0
 🗑️ Archivos eliminados: 0
 💾 Espacio total usado: 0 B
+📅 Primera actividad: Nunca
 📅 Última actividad: Nunca
-🔗 Nube: {user_info['moodle_host']}
+🔗 Nube: {user_info['moodle_host']}{proxy_info}
 ━━━━━━━━━━━━━━━━━━━
 ℹ️ Aún no has realizado ninguna acción
                 """
@@ -602,11 +1107,12 @@ def onmessage(update,bot:ObigramClient):
         # COMANDOS DE ADMINISTRADOR
         if username == ADMIN_USERNAME:
             if '/admin' in msgText:
-                stats = memory_stats.get_all_stats()
+                stats = persistent_stats.get_all_stats()
+                summary = persistent_stats.get_stats_summary()
                 total_size_formatted = format_file_size(stats['total_size_uploaded'])
                 current_date = format_cuba_date()
                 
-                if memory_stats.has_any_data():
+                if persistent_stats.has_any_data():
                     admin_msg = f"""
 👑 PANEL DE ADMINISTRADOR
 📅 {current_date}
@@ -615,14 +1121,22 @@ def onmessage(update,bot:ObigramClient):
 • Subidas totales: {stats['total_uploads']}
 • Eliminaciones totales: {stats['total_deletes']}
 • Espacio total subido: {total_size_formatted}
+• Días registrados: {stats['total_days']}
+• Usuarios únicos: {summary['total_users']}
+
+📈 PROMEDIOS:
+• {summary['avg_uploads_per_day']} subidas/día
+• {summary['avg_deletes_per_day']} eliminaciones/día
 
 🔧 COMANDOS DISPONIBLES:
 /adm_logs - Ver últimos logs
 /adm_users - Ver estadísticas por usuario
 /adm_uploads - Ver últimas subidas
 /adm_deletes - Ver últimas eliminaciones
+/adm_daily - Ver estadísticas diarias
 /adm_cleardata - Limpiar todos los datos
 ━━━━━━━━━━━━━━━━━━━
+📅 Estadísticas desde: {stats['created_at']}
 🕐 Hora Cuba: {format_cuba_datetime().split(' ')[1]}
                     """
                 else:
@@ -638,6 +1152,7 @@ Aún no se ha realizado ninguna acción en el bot.
 /adm_users - Ver estadísticas por usuario
 /adm_uploads - Ver últimas subidas
 /adm_deletes - Ver últimas eliminaciones
+/adm_daily - Ver estadísticas diarias
 ━━━━━━━━━━━━━━━━━━━
 🕐 Hora Cuba: {format_cuba_datetime().split(' ')[1]}
                     """
@@ -647,7 +1162,7 @@ Aún no se ha realizado ninguna acción en el bot.
             
             elif '/adm_logs' in msgText:
                 try:
-                    if not memory_stats.has_any_data():
+                    if not persistent_stats.has_any_data():
                         bot.editMessageText(message, "⚠️ No hay datos registrados\nAún no se ha realizado ninguna acción en el bot.")
                         return
                     
@@ -657,8 +1172,8 @@ Aún no se ha realizado ninguna acción en el bot.
                             limit = int(msgText.split('_')[2])
                         except: pass
                     
-                    uploads = memory_stats.get_recent_uploads(limit)
-                    deletes = memory_stats.get_recent_deletes(limit)
+                    uploads = persistent_stats.get_recent_uploads(limit)
+                    deletes = persistent_stats.get_recent_deletes(limit)
                     
                     logs_msg = f"📋 ÚLTIMOS LOGS\n"
                     logs_msg += f"📅 {format_cuba_date()}\n"
@@ -667,16 +1182,16 @@ Aún no se ha realizado ninguna acción en el bot.
                     if uploads:
                         logs_msg += "⬆️ ÚLTIMAS SUBIDAS:\n"
                         for log in uploads:
-                            logs_msg += f"• {log['timestamp']} - @{log['username']}: {log['filename']} ({log['file_size_formatted']})\n"
+                            logs_msg += f"• {log['display_time']} - @{log['username']}: {log['filename']} ({log['file_size_formatted']})\n"
                         logs_msg += "\n"
                     
                     if deletes:
                         logs_msg += "🗑️ ÚLTIMAS ELIMINACIONES:\n"
                         for log in deletes:
                             if log['type'] == 'delete_all':
-                                logs_msg += f"• {log['timestamp']} - @{log['username']}: ELIMINÓ TODO ({log.get('deleted_evidences', 1)} evidencia(s), {log.get('deleted_files', '?')} archivos)\n"
+                                logs_msg += f"• {log['display_time']} - @{log['username']}: ELIMINÓ TODO ({log.get('deleted_evidences', 1)} evidencia(s), {log.get('deleted_files', '?')} archivos)\n"
                             else:
-                                logs_msg += f"• {log['timestamp']} - @{log['username']}: {log['filename']} (de: {log['evidence_name']})\n"
+                                logs_msg += f"• {log['display_time']} - @{log['username']}: {log['filename']} (de: {log['evidence_name']})\n"
                     
                     if len(logs_msg) > 4000:
                         logs_msg = logs_msg[:4000] + "\n\n⚠️ Logs truncados (demasiados)"
@@ -688,7 +1203,7 @@ Aún no se ha realizado ninguna acción en el bot.
             
             elif '/adm_users' in msgText:
                 try:
-                    users = memory_stats.get_all_users()
+                    users = persistent_stats.get_all_users()
                     if not users:
                         bot.editMessageText(message, "⚠️ No hay usuarios registrados\nAún no se ha completado ninguna acción exitosa.")
                         return
@@ -703,7 +1218,7 @@ Aún no se ha realizado ninguna acción en el bot.
                         users_msg += f"   📤 Subidas: {data['uploads']}\n"
                         users_msg += f"   🗑️ Eliminaciones: {data['deletes']}\n"
                         users_msg += f"   💾 Espacio usado: {total_size_formatted}\n"
-                        users_msg += f"   📅 Última actividad: {data['last_activity']}\n\n"
+                        users_msg += f"   📅 Última actividad: {data.get('last_activity_display', 'N/A')}\n\n"
                     
                     if len(users_msg) > 4000:
                         users_msg = users_msg[:4000] + "\n\n⚠️ Lista truncada (demasiados usuarios)"
@@ -715,7 +1230,7 @@ Aún no se ha realizado ninguna acción en el bot.
             
             elif '/adm_uploads' in msgText:
                 try:
-                    uploads = memory_stats.get_recent_uploads(15)
+                    uploads = persistent_stats.get_recent_uploads(15)
                     if not uploads:
                         bot.editMessageText(message, "⚠️ No hay subidas registradas\nAún no se ha completado ninguna subida exitosa.")
                         return
@@ -727,9 +1242,10 @@ Aún no se ha realizado ninguna acción en el bot.
                     for i, log in enumerate(uploads, 1):
                         uploads_msg += f"{i}. {log['filename']}\n"
                         uploads_msg += f"   👤 @{log['username']}\n"
-                        uploads_msg += f"   📅 {log['timestamp']}\n"
+                        uploads_msg += f"   📅 {log['display_time']}\n"
                         uploads_msg += f"   📏 {log['file_size_formatted']}\n"
-                        uploads_msg += f"   🔗 {log['moodle_host']}\n\n"
+                        uploads_msg += f"   🔗 {log['moodle_host']}\n"
+                        uploads_msg += f"   🗓️ Día: {log.get('date_key', 'N/A')}\n\n"
                     
                     bot.editMessageText(message, uploads_msg)
                 except Exception as e:
@@ -738,7 +1254,7 @@ Aún no se ha realizado ninguna acción en el bot.
             
             elif '/adm_deletes' in msgText:
                 try:
-                    deletes = memory_stats.get_recent_deletes(15)
+                    deletes = persistent_stats.get_recent_deletes(15)
                     if not deletes:
                         bot.editMessageText(message, "⚠️ No hay eliminaciones registradas\nAún no se ha completado ninguna eliminación exitosa.")
                         return
@@ -751,29 +1267,71 @@ Aún no se ha realizado ninguna acción en el bot.
                         if log['type'] == 'delete_all':
                             deletes_msg += f"{i}. ELIMINACIÓN MASIVA\n"
                             deletes_msg += f"   👤 @{log['username']}\n"
-                            deletes_msg += f"   📅 {log['timestamp']}\n"
+                            deletes_msg += f"   📅 {log['display_time']}\n"
                             deletes_msg += f"   ⚠️ ELIMINÓ {log.get('deleted_evidences', 1)} EVIDENCIA(S)\n"
                             deletes_msg += f"   🗑️ Archivos borrados: {log.get('deleted_files', '?')}\n"
                         else:
                             deletes_msg += f"{i}. {log['filename']}\n"
                             deletes_msg += f"   👤 @{log['username']}\n"
-                            deletes_msg += f"   📅 {log['timestamp']}\n"
+                            deletes_msg += f"   📅 {log['display_time']}\n"
                             deletes_msg += f"   📁 Evidencia: {log['evidence_name']}\n"
                         
-                        deletes_msg += f"   🔗 {log['moodle_host']}\n\n"
+                        deletes_msg += f"   🔗 {log['moodle_host']}\n"
+                        deletes_msg += f"   🗓️ Día: {log.get('date_key', 'N/A')}\n\n"
                     
                     bot.editMessageText(message, deletes_msg)
                 except Exception as e:
                     bot.editMessageText(message, f"❌ Error al obtener eliminaciones: {str(e)}")
                 return
             
-            elif '/adm_cleardata' in msgText:
+            elif '/adm_daily' in msgText:
                 try:
-                    if not memory_stats.has_any_data():
-                        bot.editMessageText(message, "⚠️ No hay datos para limpiar\nLa memoria está vacía.")
+                    daily_stats = persistent_stats.get_all_daily_stats()
+                    if not daily_stats:
+                        bot.editMessageText(message, "⚠️ No hay estadísticas diarias")
                         return
                     
-                    result = memory_stats.clear_all_data()
+                    # Ordenar fechas de más reciente a más antigua
+                    sorted_dates = sorted(daily_stats.keys(), reverse=True)
+                    
+                    daily_msg = f"📅 ESTADÍSTICAS DIARIAS\n"
+                    daily_msg += f"Total días: {len(sorted_dates)}\n"
+                    daily_msg += f"━━━━━━━━━━━━━━━━━━━\n\n"
+                    
+                    # Mostrar últimos 7 días o todos si son menos
+                    limit = min(7, len(sorted_dates))
+                    for i in range(limit):
+                        date_key = sorted_dates[i]
+                        day_data = daily_stats[date_key]
+                        
+                        # Formatear fecha
+                        try:
+                            year, month, day = date_key.split('-')
+                            formatted_date = f"{day}/{month}/{year}"
+                        except:
+                            formatted_date = date_key
+                        
+                        daily_msg += f"📅 {formatted_date}\n"
+                        daily_msg += f"   📤 Subidas: {day_data.get('uploads', 0)}\n"
+                        daily_msg += f"   🗑️ Eliminaciones: {day_data.get('deletes', 0)}\n"
+                        daily_msg += f"   💾 Tamaño: {format_file_size(day_data.get('total_size', 0))}\n"
+                        daily_msg += f"   👥 Usuarios: {len(day_data.get('users', {}))}\n\n"
+                    
+                    if len(sorted_dates) > 7:
+                        daily_msg += f"... y {len(sorted_dates) - 7} días más\n"
+                    
+                    bot.editMessageText(message, daily_msg)
+                except Exception as e:
+                    bot.editMessageText(message, f"❌ Error al obtener estadísticas diarias: {str(e)}")
+                return
+            
+            elif '/adm_cleardata' in msgText:
+                try:
+                    if not persistent_stats.has_any_data():
+                        bot.editMessageText(message, "⚠️ No hay datos para limpiar\nLa base de datos está vacía.")
+                        return
+                    
+                    result = persistent_stats.clear_all_data()
                     bot.editMessageText(message, f"✅ {result}")
                 except Exception as e:
                     bot.editMessageText(message, f"❌ Error al limpiar datos: {str(e)}")
@@ -781,11 +1339,26 @@ Aún no se ha realizado ninguna acción en el bot.
 
         # COMANDOS NORMALES
         if '/start' in msgText:
-            start_msg = f'👤 Usuario: @{username}\n☁️ Nube: Moodle\n📁 Evidence: Activado\n🔗 Host: {user_info["moodle_host"]}'
+            # Mostrar información del proxy actual
+            proxy_info = ""
+            if user_info.get('proxy'):
+                proxy_parsed = ProxyManager.parse_proxy(user_info['proxy'])
+                if proxy_parsed:
+                    proxy_info = f"\n🔧 Proxy: {proxy_parsed['type'].upper()} {proxy_parsed['ip']}:{proxy_parsed['port']}"
+                else:
+                    proxy_info = f"\n🔧 Proxy: {user_info['proxy']}"
+            else:
+                proxy_info = "\n🔧 Proxy: No configurado"
+            
+            start_msg = f'👤 Usuario: @{username}\n☁️ Nube: Moodle\n📁 Evidence: Activado\n🔗 Host: {user_info["moodle_host"]}{proxy_info}'
             bot.editMessageText(message,start_msg)
             
         elif '/files' == msgText:
-             proxy = ProxyCloud.parse(user_info['proxy'])
+             # OBTENER PROXY USANDO EL NUEVO SISTEMA
+             proxy = {}
+             if user_info.get('proxy'):
+                 proxy = ProxyManager.get_proxy_for_requests(user_info['proxy'])
+             
              client = MoodleClient(user_info['moodle_user'],
                                    user_info['moodle_password'],
                                    user_info['moodle_host'],
@@ -802,7 +1375,11 @@ Aún no se ha realizado ninguna acción en el bot.
         elif '/txt_' in msgText:
              try:
                  findex = int(str(msgText).split('_')[1])
-                 proxy = ProxyCloud.parse(user_info['proxy'])
+                 # OBTENER PROXY USANDO EL NUEVO SISTEMA
+                 proxy = {}
+                 if user_info.get('proxy'):
+                     proxy = ProxyManager.get_proxy_for_requests(user_info['proxy'])
+                 
                  client = MoodleClient(user_info['moodle_user'],
                                        user_info['moodle_password'],
                                        user_info['moodle_host'],
@@ -831,7 +1408,11 @@ Aún no se ha realizado ninguna acción en el bot.
         elif '/del_' in msgText:
             try:
                 findex = int(str(msgText).split('_')[1])
-                proxy = ProxyCloud.parse(user_info['proxy'])
+                # OBTENER PROXY USANDO EL NUEVO SISTEMA
+                proxy = {}
+                if user_info.get('proxy'):
+                    proxy = ProxyManager.get_proxy_for_requests(user_info['proxy'])
+                
                 client = MoodleClient(user_info['moodle_user'],
                                        user_info['moodle_password'],
                                        user_info['moodle_host'],
@@ -881,7 +1462,7 @@ Aún no se ha realizado ninguna acción en el bot.
                     
                     # REGISTRAR CADA ARCHIVO ELIMINADO
                     for filename in deleted_files:
-                        memory_stats.log_delete(
+                        persistent_stats.log_delete(
                             username=username,
                             filename=filename,
                             evidence_name=evidence_name,
@@ -903,7 +1484,11 @@ Aún no se ha realizado ninguna acción en el bot.
                 
         elif '/delall' in msgText:
             try:
-                proxy = ProxyCloud.parse(user_info['proxy'])
+                # OBTENER PROXY USANDO EL NUEVO SISTEMA
+                proxy = {}
+                if user_info.get('proxy'):
+                    proxy = ProxyManager.get_proxy_for_requests(user_info['proxy'])
+                
                 client = MoodleClient(user_info['moodle_user'],
                                        user_info['moodle_password'],
                                        user_info['moodle_host'],
@@ -963,17 +1548,17 @@ Aún no se ha realizado ninguna acción en el bot.
                     
                     client.logout()
                     
-                    # REGISTRAR ELIMINACIÓN MASIVA - ¡AHORA CUENTA TODOS LOS ARCHIVOS!
-                    memory_stats.log_delete_all(
+                    # REGISTRAR ELIMINACIÓN MASIVA
+                    persistent_stats.log_delete_all(
                         username=username, 
                         deleted_evidences=total_evidences, 
-                        deleted_files=total_files,  # ¡TODOS los archivos!
+                        deleted_files=total_files,
                         moodle_host=user_info['moodle_host']
                     )
                     
                     # También registrar cada archivo individualmente para logs detallados
                     for file_info in all_deleted_files:
-                        memory_stats.log_delete(
+                        persistent_stats.log_delete(
                             username=username,
                             filename=file_info['filename'],
                             evidence_name=file_info['evidence_name'],
@@ -996,11 +1581,12 @@ Aún no se ha realizado ninguna acción en el bot.
             
             try:
                 import requests
+                # OBTENER PROXY USANDO EL NUEVO SISTEMA
                 headers = {}
-                if user_info['proxy']:
-                    proxy_dict = ProxyCloud.parse(user_info['proxy'])
-                    if 'http' in proxy_dict:
-                        headers.update({'Proxy': proxy_dict['http']})
+                if user_info.get('proxy'):
+                    proxy_dict = ProxyManager.get_proxy_for_requests(user_info['proxy'])
+                    if proxy_dict:
+                        headers.update({'Proxy': proxy_dict.get('http', '')})
                 
                 response = requests.head(url, allow_redirects=True, timeout=5, headers=headers)
                 file_size = int(response.headers.get('content-length', 0))
