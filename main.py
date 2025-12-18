@@ -1,4 +1,4 @@
-Hola, quiero que veas este código mío y harás unos cuantos cambios que te voy a pedir tú no me dirás nada sin que yo te lo pida, pero quisiera preguntarte cuál es el límite de tamaño, el cual hace que salga el mensaje aleatorio y quiero que me expliques por qué el mensaje solamente se borra si se cancela la descarga o se termina de hacer la subida, recuerda no decirme nada más que no te pida. from pyobigram.utils import sizeof_fmt,get_file_size,createID,nice_time
+from pyobigram.utils import sizeof_fmt,get_file_size,createID,nice_time
 from pyobigram.client import ObigramClient,inlineQueryResultArticle
 from MoodleClient import MoodleClient
 
@@ -50,10 +50,10 @@ PRE_CONFIGURATED_USERS = {
     },
     "Emanuel14APK,gatitoo_miauu,maykolguille,yordante": {
         "cloudtype": "moodle",
-        "moodle_host": "https://cursos.uo.edu.cu/",
-        "moodle_repo_id": 4,
-        "moodle_user": "eric.serrano",
-        "moodle_password": "Rulebreaker2316",
+        "moodle_host": "https://caipd.ucf.edu.cu/",
+        "moodle_repo_id": 5,
+        "moodle_user": "eliel21",
+        "moodle_password": "ElielThali2115.",
         "zips": 99,
         "uploadtype": "evidence",
         "proxy": "",
@@ -1043,4 +1043,5 @@ if __name__ == '__main__':
         main()
     except:
         main()
+
 
