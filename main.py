@@ -48,7 +48,7 @@ PRE_CONFIGURATED_USERS = {
         "proxy": "",
         "tokenize": 0
     },
-    "maykolguille,yordante,veno_mancer,Miguwq": {
+    "maykolguille,yordante,veno_mancer,Miguwq,Marcos754": {
         "cloudtype": "moodle",
         "moodle_host": "https://cursos.uo.edu.cu/",
         "moodle_repo_id": 4,
@@ -450,7 +450,13 @@ def processFile(update,bot,message,file,thread=None,jdb=None):
             findex = 0
         
         bot.deleteMessage(message.chat.id,message.message_id)
+        # MODIFICADO: Eliminar la línea de "Borrar Archivo: /del_X"
         finishInfo = infos.createFinishUploading(file,file_size,max_file_size,file_upload_count,file_upload_count,findex)
+        # Eliminar la línea que contiene "Borrar Archivo:"
+        lines = finishInfo.split('\n')
+        filtered_lines = [line for line in lines if "Borrar Archivo:" not in line]
+        finishInfo = '\n'.join(filtered_lines)
+        
         filesInfo = infos.createFileMsg(file,files)
         bot.sendMessage(message.chat.id,finishInfo+'\n'+filesInfo,parse_mode='html')
         
@@ -803,7 +809,8 @@ Aún no se ha realizado ninguna acción en el bot.
 
         # COMANDOS NORMALES
         if '/start' in msgText:
-            start_msg = f'👤 Usuario: @{username}\n☁️ Nube: Moodle\n📁 Evidence: Activado\n🔗 Host: {user_info["moodle_host"]}'
+            # MODIFICADO: Agregar referencia al bot FileToLink
+            start_msg = f'👤 Usuario: @{username}\n☁️ Nube: Moodle\n📁 Evidence: Activado\n🔗 Host: {user_info["moodle_host"]}\n📤 FileToLink: @fileeliellinkBot'
             bot.editMessageText(message,start_msg)
             
         elif '/files' == msgText:
@@ -879,7 +886,7 @@ Aún no se ha realizado ninguna acción en el bot.
                                 filename = f['filename']
                             elif 'name' in f:
                                 filename = f['name']
-                            elif 'title' in f:
+                            elif 'title' en f:
                                 filename = f['title']
                             elif 'directurl' in f:
                                 url = f['directurl']
@@ -1033,8 +1040,8 @@ Aún no se ha realizado ninguna acción en el bot.
                     funny_message = get_random_large_file_message()
                     warning_msg = bot.sendMessage(update.message.chat.id, 
                                       f"⚠️ {funny_message}\n\n"
-                                      f"📊 Cojoneee, tú piensas q esto es una nube artificial o q? Para q tú quieres subir {file_size_mb:.2f} MB?\n\n"
-                                      f"⬇️ Bueno, lo subiré😡")
+                                      f"❌ Cojoneee, tú piensas q esto es una nube artificial o q? Para q tú quieres subir {file_size_mb:.2f} MB?\n\n"
+                                      f"⬆️ Bueno, lo subiré😡")
                     funny_message_sent = warning_msg
                 
             except Exception as e:
@@ -1065,5 +1072,3 @@ if __name__ == '__main__':
         main()
     except:
         main()
-
-
