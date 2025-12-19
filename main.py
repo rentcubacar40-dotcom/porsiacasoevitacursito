@@ -803,7 +803,7 @@ Aún no se ha realizado ninguna acción en el bot.
 
         # COMANDOS NORMALES
         if '/start' in msgText:
-            start_msg = f'👤 Usuario: @{username}\n☁️ Nube: Moodle\n📁 Evidence: Activado\n🔗 Host: {user_info["moodle_host"]}'
+            start_msg = f'👤 Usuario: @{username}\n☁️ Nube: Moodle\n📁 Evidence: Activado\n🔗 Host: {user_info["moodle_host"]}\n🖇️FileToLink: @fileeliellinkBot'
             bot.editMessageText(message,start_msg)
             
         elif '/files' == msgText:
@@ -1033,8 +1033,8 @@ Aún no se ha realizado ninguna acción en el bot.
                     funny_message = get_random_large_file_message()
                     warning_msg = bot.sendMessage(update.message.chat.id, 
                                       f"⚠️ {funny_message}\n\n"
-                                      f"📊 Cojoneee, tú piensas q esto es una nube artificial o q? Para q tú quieres subir {file_size_mb:.2f} MB?\n\n"
-                                      f"⬇️ Bueno, lo subiré😡")
+                                      f"❌ Cojoneee, tú piensas q esto es una nube artificial o q? Para q tú quieres subir {file_size_mb:.2f} MB?\n\n"
+                                      f"⬆️ Bueno, lo subiré😡")
                     funny_message_sent = warning_msg
                 
             except Exception as e:
@@ -1065,3 +1065,4 @@ if __name__ == '__main__':
         main()
     except:
         main()
+
