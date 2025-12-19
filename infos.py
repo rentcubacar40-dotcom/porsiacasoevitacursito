@@ -69,7 +69,7 @@ def createUploading(filename,totalBits,currentBits,speed,time,originalname=''):
     msg += '⌸ Total: '+sizeof_fmt(totalBits)+'\n\n'
     msg += '𖤹 Subido: '+sizeof_fmt(currentBits)+'\n\n'
     msg += '⎚ Velocidad: '+sizeof_fmt(speed)+'/s\n\n'
-    msg += '⎋ Tiempo de Descarga: '+str(datetime.timedelta(seconds=int(time)))+'s\n\n'
+    msg += '⎋ Tiempo de Subida: '+str(datetime.timedelta(seconds=int(time)))+'s\n\n'
 
     return msg
 def createCompresing(filename,filesize,splitsize):
@@ -84,7 +84,7 @@ def createFinishUploading(filename,filesize,split_size,current,count,findex):
     msg+= '❖ Nombre: ' + str(filename)+'\n'
     msg+= '⌸ Tamaño Total: ' + str(sizeof_fmt(filesize))+'\n'
     msg+= 'ㄓ Tamaño Partes: ' + str(sizeof_fmt(split_size))+'\n'
-    msg+= '𖤹 Partes Subidas: ' + str(current) + '/' + str(count) +'\n\n'
+    msg+= '𖤹 Partes Subidas: ' + str(current) + '/' + str(count) +'\n'
     #msg+= '⎙ Borrar Archivo: ' + '/del_'+str(findex)
     return msg
 
