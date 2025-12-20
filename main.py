@@ -851,164 +851,176 @@ Aún no se ha realizado ninguna acción en el bot.
                  print(f"Error en /txt_: {e}")
              
         elif '/del_' in msgText:
-            try:
-                findex = int(str(msgText).split('_')[1])
-                proxy = ProxyCloud.parse(user_info['proxy'])
-                client = MoodleClient(user_info['moodle_user'],
-                                       user_info['moodle_password'],
-                                       user_info['moodle_host'],
-                                       user_info['moodle_repo_id'],
-                                       proxy=proxy)
-                loged = client.login()
-                if loged:
-                    evidences = client.getEvidences()
-                    if findex < 0 or findex >= len(evidences):
-                        bot.editMessageText(message, f'❌ Índice inválido. Use /files para ver la lista.')
-                        client.logout()
-                        return
+    try:
+        findex = int(str(msgText).split('_')[1])
+        proxy = ProxyCloud.parse(user_info['proxy'])
+        client = MoodleClient(user_info['moodle_user'],
+                               user_info['moodle_password'],
+                               user_info['moodle_host'],
+                               user_info['moodle_repo_id'],
+                               proxy=proxy)
+        loged = client.login()
+        if loged:
+            evidences = client.getEvidences()
+            if findex < 0 or findex >= len(evidences):
+                bot.editMessageText(message, f'❌ Índice inválido. Use /files para ver la lista.')
+                client.logout()
+                return
+            
+            evfile = evidences[findex]
+            evidence_name = evfile['name']
+            
+            # OBTENER NOMBRES REALES DE LOS ARCHIVOS
+            deleted_files = []
+            if 'files' in evfile:
+                for f in evfile['files']:
+                    filename = None
+                    if 'filename' in f:
+                        filename = f['filename']
+                    elif 'name' in f:
+                        filename = f['name']
+                    elif 'title' in f:
+                        filename = f['title']
+                    elif 'directurl' in f:
+                        url = f['directurl']
+                        if 'filename=' in url:
+                            import urllib.parse
+                            parsed = urllib.parse.urlparse(url)
+                            params = urllib.parse.parse_qs(parsed.query)
+                            if 'filename' in params:
+                                filename = params['filename'][0]
+                        elif '/' in url:
+                            filename = url.split('/')[-1].split('?')[0]
                     
-                    evfile = evidences[findex]
-                    evidence_name = evfile['name']
+                    if not filename:
+                        filename = f"archivo_{len(deleted_files)+1}"
                     
-                    # OBTENER NOMBRES REALES DE LOS ARCHIVOS
-                    deleted_files = []
-                    if 'files' in evfile:
-                        for f in evfile['files']:
-                            filename = None
-                            if 'filename' in f:
-                                filename = f['filename']
-                            elif 'name' in f:
-                                filename = f['name']
-                            elif 'title' in f:
-                                filename = f['title']
-                            elif 'directurl' in f:
-                                url = f['directurl']
-                                if 'filename=' in url:
-                                    import urllib.parse
-                                    parsed = urllib.parse.urlparse(url)
-                                    params = urllib.parse.parse_qs(parsed.query)
-                                    if 'filename' in params:
-                                        filename = params['filename'][0]
-                                elif '/' in url:
-                                    filename = url.split('/')[-1].split('?')[0]
-                            
-                            if not filename:
-                                filename = f"archivo_{len(deleted_files)+1}"
-                            
-                            deleted_files.append(filename)
-                    
-                    # Eliminar la evidencia
-                    client.deleteEvidence(evfile)
-                    client.logout()
-                    
-                    # REGISTRAR CADA ARCHIVO ELIMINADO
-                    for filename in deleted_files:
-                        memory_stats.log_delete(
-                            username=username,
-                            filename=filename,
-                            evidence_name=evidence_name,
-                            moodle_host=user_info['moodle_host']
-                        )
-                    
-                    if len(deleted_files) > 0:
-                        bot.editMessageText(message, f'🗑️ Evidencia eliminada: {evidence_name}\n📦 {len(deleted_files)} archivo(s) borrado(s)')
-                    else:
-                        bot.editMessageText(message, f'🗑️ Evidencia eliminada: {evidence_name}')
-                    
-                else:
-                    bot.editMessageText(message,'➲ Error y Causas ✗\n1-Revise su Cuenta\n2-Servidor Deshabilitado: '+client.path)
-            except ValueError:
-                bot.editMessageText(message, '❌ Formato incorrecto. Use: /del_0 (donde 0 es el número de la evidencia)')
-            except Exception as e:
-                bot.editMessageText(message, f'❌ Error: {str(e)}')
-                print(f"Error en /del_: {e}")
+                    deleted_files.append(filename)
+            
+            # Eliminar la evidencia
+            client.deleteEvidence(evfile)
+            
+            # OBTENER LISTA ACTUALIZADA DESPUÉS DE ELIMINAR
+            evidences = client.getEvidences()
+            client.logout()
+            
+            # REGISTRAR CADA ARCHIVO ELIMINADO
+            for filename in deleted_files:
+                memory_stats.log_delete(
+                    username=username,
+                    filename=filename,
+                    evidence_name=evidence_name,
+                    moodle_host=user_info['moodle_host']
+                )
+            
+            # MOSTRAR LISTA ACTUALIZADA O MENSAJE DE NO DISPONIBLES
+            if len(evidences) > 0:
+                filesInfo = infos.createFilesMsg(evidences)
+                bot.editMessageText(message, f'🗑️ Evidencia eliminada: {evidence_name}\n\n📋 Lista actualizada:\n{filesInfo}')
+            else:
+                bot.editMessageText(message, f'🗑️ Evidencia eliminada: {evidence_name}\n\n📭 No hay evidencias disponibles')
+            
+        else:
+            bot.editMessageText(message,'➲ Error y Causas ✗\n1-Revise su Cuenta\n2-Servidor Deshabilitado: '+client.path)
+    except ValueError:
+        bot.editMessageText(message, '❌ Formato incorrecto. Use: /del_0 (donde 0 es el número de la evidencia)')
+    except Exception as e:
+        bot.editMessageText(message, f'❌ Error: {str(e)}')
+        print(f"Error en /del_: {e}")
+
+elif '/delall' in msgText:
+    try:
+        proxy = ProxyCloud.parse(user_info['proxy'])
+        client = MoodleClient(user_info['moodle_user'],
+                               user_info['moodle_password'],
+                               user_info['moodle_host'],
+                               user_info['moodle_repo_id'],
+                               proxy=proxy)
+        loged = client.login()
+        if loged:
+            evfiles = client.getEvidences()
+            if not evfiles:
+                bot.editMessageText(message, '📭 No hay evidencias disponibles')
+                client.logout()
+                return
+            
+            total_evidences = len(evfiles)
+            total_files = 0
+            
+            # Contar archivos totales y registrar cada archivo individual
+            all_deleted_files = []
+            for ev in evfiles:
+                files_in_evidence = ev.get('files', [])
+                total_files += len(files_in_evidence)
                 
-        elif '/delall' in msgText:
-            try:
-                proxy = ProxyCloud.parse(user_info['proxy'])
-                client = MoodleClient(user_info['moodle_user'],
-                                       user_info['moodle_password'],
-                                       user_info['moodle_host'],
-                                       user_info['moodle_repo_id'],
-                                       proxy=proxy)
-                loged = client.login()
-                if loged:
-                    evfiles = client.getEvidences()
-                    if not evfiles:
-                        bot.editMessageText(message, 'ℹ️ No hay evidencias para eliminar')
-                        client.logout()
-                        return
+                # Registrar cada archivo individual para estadísticas
+                for f in files_in_evidence:
+                    filename = None
+                    if 'filename' in f:
+                        filename = f['filename']
+                    elif 'name' in f:
+                        filename = f['name']
+                    elif 'title' in f:
+                        filename = f['title']
+                    elif 'directurl' in f:
+                        url = f['directurl']
+                        if 'filename=' in url:
+                            import urllib.parse
+                            parsed = urllib.parse.urlparse(url)
+                            params = urllib.parse.parse_qs(parsed.query)
+                            if 'filename' in params:
+                                filename = params['filename'][0]
+                            elif '/' in url:
+                                filename = url.split('/')[-1].split('?')[0]
                     
-                    total_evidences = len(evfiles)
-                    total_files = 0
+                    if not filename:
+                        filename = f"archivo_{len(all_deleted_files)+1}"
                     
-                    # Contar archivos totales y registrar cada archivo individual
-                    all_deleted_files = []
-                    for ev in evfiles:
-                        files_in_evidence = ev.get('files', [])
-                        total_files += len(files_in_evidence)
-                        
-                        # Registrar cada archivo individual para estadísticas
-                        for f in files_in_evidence:
-                            filename = None
-                            if 'filename' in f:
-                                filename = f['filename']
-                            elif 'name' in f:
-                                filename = f['name']
-                            elif 'title' in f:
-                                filename = f['title']
-                            elif 'directurl' in f:
-                                url = f['directurl']
-                                if 'filename=' in url:
-                                    import urllib.parse
-                                    parsed = urllib.parse.urlparse(url)
-                                    params = urllib.parse.parse_qs(parsed.query)
-                                    if 'filename' in params:
-                                        filename = params['filename'][0]
-                                elif '/' in url:
-                                    filename = url.split('/')[-1].split('?')[0]
-                            
-                            if not filename:
-                                filename = f"archivo_{len(all_deleted_files)+1}"
-                            
-                            all_deleted_files.append({
-                                'filename': filename,
-                                'evidence_name': ev['name']
-                            })
-                    
-                    # Eliminar TODAS las evidencias
-                    for item in evfiles:
-                        try:
-                            client.deleteEvidence(item)
-                        except Exception as e:
-                            print(f"Error eliminando evidencia: {e}")
-                    
-                    client.logout()
-                    
-                    # REGISTRAR ELIMINACIÓN MASIVA - ¡AHORA CUENTA TODOS LOS ARCHIVOS!
-                    memory_stats.log_delete_all(
-                        username=username, 
-                        deleted_evidences=total_evidences, 
-                        deleted_files=total_files,  # ¡TODOS los archivos!
-                        moodle_host=user_info['moodle_host']
-                    )
-                    
-                    # También registrar cada archivo individualmente para logs detallados
-                    for file_info in all_deleted_files:
-                        memory_stats.log_delete(
-                            username=username,
-                            filename=file_info['filename'],
-                            evidence_name=file_info['evidence_name'],
-                            moodle_host=user_info['moodle_host']
-                        )
-                    
-                    bot.editMessageText(message, f'🗑️ TODAS las evidencias eliminadas\n📦 {total_evidences} evidencia(s) borrada(s)\n📁 Total archivos: {total_files}')
-                    
-                else:
-                    bot.editMessageText(message,'➲ Error y Causas🧐\n1-Revise su Cuenta\n2-Servidor Deshabilitado: '+client.path)
-            except Exception as e:
-                bot.editMessageText(message, f'❌ Error: {str(e)}')
-                print(f"Error en /delall: {e}")
+                    all_deleted_files.append({
+                        'filename': filename,
+                        'evidence_name': ev['name']
+                    })
+            
+            # Eliminar TODAS las evidencias
+            for item in evfiles:
+                try:
+                    client.deleteEvidence(item)
+                except Exception as e:
+                    print(f"Error eliminando evidencia: {e}")
+            
+            # OBTENER LISTA ACTUALIZADA DESPUÉS DE ELIMINAR
+            evidences = client.getEvidences()
+            client.logout()
+            
+            # REGISTRAR ELIMINACIÓN MASIVA
+            memory_stats.log_delete_all(
+                username=username, 
+                deleted_evidences=total_evidences, 
+                deleted_files=total_files,
+                moodle_host=user_info['moodle_host']
+            )
+            
+            # También registrar cada archivo individualmente para logs detallados
+            for file_info in all_deleted_files:
+                memory_stats.log_delete(
+                    username=username,
+                    filename=file_info['filename'],
+                    evidence_name=file_info['evidence_name'],
+                    moodle_host=user_info['moodle_host']
+                )
+            
+            # VERIFICAR SI HAY EVIDENCIAS DESPUÉS DE ELIMINAR
+            if len(evidences) > 0:
+                filesInfo = infos.createFilesMsg(evidences)
+                bot.editMessageText(message, f'🗑️ TODAS las evidencias eliminadas\n📦 {total_evidences} evidencia(s) borrada(s)\n📁 Total archivos: {total_files}\n\n📋 Evidencias restantes:\n{filesInfo}')
+            else:
+                bot.editMessageText(message, f'🗑️ TODAS las evidencias eliminadas\n📦 {total_evidences} evidencia(s) borrada(s)\n📁 Total archivos: {total_files}\n\n📭 No hay evidencias disponibles')
+            
+        else:
+            bot.editMessageText(message,'➲ Error y Causas🧐\n1-Revise su Cuenta\n2-Servidor Deshabilitado: '+client.path)
+    except Exception as e:
+        bot.editMessageText(message, f'❌ Error: {str(e)}')
+        print(f"Error en /delall: {e}")
                 
         elif 'http' in msgText:
             url = msgText
@@ -1065,4 +1077,5 @@ if __name__ == '__main__':
         main()
     except:
         main()
+
 
