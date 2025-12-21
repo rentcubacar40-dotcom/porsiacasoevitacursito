@@ -824,8 +824,8 @@ Aún no se ha realizado ninguna acción en el bot.
                     
                     for idx, item in enumerate(visible_list):
                         # SOLO CAMBIO AQUÍ: quité el 🚀
-                        files_msg += f" {item['name']} ({item['file_count']})\n"
-                        files_msg += f"  /txt_{idx} /del_{idx}\n"
+                        files_msg += f" {item['name']} ({item['file_count']})\n\n"
+                        files_msg += f" /txt_{idx} /del_{idx}\n"
                     
                     files_msg += f"━━━━━━━━━━━━━━━━━━━\n"
                     files_msg += f"Total: {len(visible_list)} evidencia(s)"
@@ -949,8 +949,8 @@ Aún no se ha realizado ninguna acción en el bot.
                             clean_name = item['clean_name']
                             item_file_count = len(item['original']['files']) if 'files' in item['original'] else 0
                             # SOLO CAMBIO AQUÍ: quité el 🚀
-                            confirmation_msg += f" {clean_name} ({item_file_count})\n"
-                            confirmation_msg += f"  /txt_{idx} /del_{idx}\n"
+                            confirmation_msg += f" {clean_name} ({item_file_count})\n\n"
+                            confirmation_msg += f" /txt_{idx} /del_{idx}\n"
                         
                         bot.editMessageText(message, confirmation_msg)
                     else:
@@ -1076,6 +1076,7 @@ if __name__ == '__main__':
         main()
     except:
         main()
+
 
 
 
