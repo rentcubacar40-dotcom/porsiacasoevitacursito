@@ -396,7 +396,7 @@ def processFile(update,bot,message,file,thread=None,jdb=None):
         bot.editMessageText(message,compresingInfo)
         zipname = str(file).split('.')[0] + createID()
         mult_file = zipfile.MultiFile(zipname,max_file_size)
-        zip = zipfile.ZipFile(mult_file,  mode='w', compression=zipfile.ZIP_DEFLATED)
+        zip = zipfile.ZipFile(mult_file,  mode='w', compression=zipfile.ZIP_DEFLated)
         zip.write(file)
         zip.close()
         mult_file.close()
@@ -807,18 +807,22 @@ Aún no se ha realizado ninguna acción en el bot.
             bot.editMessageText(message,start_msg)
             
         elif '/files' == msgText:
-             proxy = ProxyCloud.parse(user_info['proxy'])
-             client = MoodleClient(user_info['moodle_user'],
+            proxy = ProxyCloud.parse(user_info['proxy'])
+            client = MoodleClient(user_info['moodle_user'],
                                    user_info['moodle_password'],
                                    user_info['moodle_host'],
                                    user_info['moodle_repo_id'],proxy=proxy)
-             loged = client.login()
-             if loged:
-                 files = client.getEvidences()
-                 filesInfo = infos.createFilesMsg(files)
-                 bot.editMessageText(message,filesInfo)
-                 client.logout()
-             else:
+            loged = client.login()
+            if loged:
+                files = client.getEvidences()
+                # VERIFICAR SI HAY EVIDENCIAS
+                if len(files) > 0:
+                    filesInfo = infos.createFilesMsg(files)
+                    bot.editMessageText(message,filesInfo)
+                else:
+                    bot.editMessageText(message,'📭 No hay evidencias disponibles')
+                client.logout()
+            else:
                 bot.editMessageText(message,'➲ Error y Causas🧐\n1-Revise su Cuenta\n2-Servidor Deshabilitado: '+client.path)
                 
         elif '/txt_' in msgText:
