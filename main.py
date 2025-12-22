@@ -578,13 +578,9 @@ def delete_message_after_delay(bot, chat_id, message_id, delay=8):
     thread.daemon = True
     thread.start()
 
-# ==============================
-# FUNCIONES OPTIMIZADAS CON TIMEOUT
-# ==============================
-
-def get_all_cloud_evidences_fast(use_cache=True, timeout=10):
+def get_all_cloud_evidences_fast(use_cache=True):
     """
-    Obtiene todas las evidencias de todas las nubes preconfiguradas (versión optimizada con timeout)
+    Obtiene todas las evidencias de todas las nubes preconfiguradas (versión optimizada)
     """
     # Verificar caché primero
     if use_cache and not cloud_cache.should_refresh():
@@ -614,51 +610,27 @@ def get_all_cloud_evidences_fast(use_cache=True, timeout=10):
             proxy_parsed = ProxyCloud.parse(proxy)
             client = MoodleClient(moodle_user, moodle_password, moodle_host, moodle_repo_id, proxy=proxy_parsed)
             
-            # Usar hilo con timeout
-            def login_task():
-                return client.login()
-            
-            login_success = False
-            try:
-                # Intentar login con timeout
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(login_task)
-                    login_success = future.result(timeout=timeout)
-            except:
-                print(f"Timeout en conexión a {moodle_host}")
-                continue
-            
-            if login_success:
-                try:
-                    # Obtener evidencias con timeout
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(client.getEvidences)
-                        evidences = future.result(timeout=timeout)
-                        
-                        # Procesar cada evidencia
-                        for evidence in evidences:
-                            evidence_info = {
-                                'cloud_name': moodle_host,
-                                'cloud_user': moodle_user,
-                                'evidence_name': evidence.get('name', 'Sin nombre'),
-                                'files_count': len(evidence.get('files', [])),
-                                'evidence_data': evidence,
-                                'group_users': user_group.split(','),
-                                'cloud_config': cloud_config
-                            }
-                            all_evidences.append(evidence_info)
-                        
-                        client.logout()
-                        # Actualizar caché
-                        if use_cache:
-                            cloud_cache.update_cache(moodle_host, [ev for ev in all_evidences if ev['cloud_name'] == moodle_host])
-                except:
-                    print(f"Timeout obteniendo evidencias de {moodle_host}")
-                    try:
-                        client.logout()
-                    except:
-                        pass
+            if client.login():
+                # Obtener todas las evidencias de esta nube
+                evidences = client.getEvidences()
+                
+                # Procesar cada evidencia
+                for evidence in evidences:
+                    evidence_info = {
+                        'cloud_name': moodle_host,
+                        'cloud_user': moodle_user,
+                        'evidence_name': evidence.get('name', 'Sin nombre'),
+                        'files_count': len(evidence.get('files', [])),
+                        'evidence_data': evidence,
+                        'group_users': user_group.split(','),
+                        'cloud_config': cloud_config
+                    }
+                    all_evidences.append(evidence_info)
+                
+                client.logout()
+                # Actualizar caché
+                if use_cache:
+                    cloud_cache.update_cache(moodle_host, [ev for ev in all_evidences if ev['cloud_name'] == moodle_host])
             else:
                 print(f"No se pudo conectar a {moodle_host}")
                 
@@ -671,9 +643,9 @@ def get_all_cloud_evidences_fast(use_cache=True, timeout=10):
     
     return all_evidences
 
-def delete_evidence_from_cloud(cloud_config, evidence, timeout=15):
+def delete_evidence_from_cloud(cloud_config, evidence):
     """
-    Elimina una evidencia específica de una nube con timeout
+    Elimina una evidencia específica de una nube
     """
     try:
         moodle_host = cloud_config.get('moodle_host', '')
@@ -685,48 +657,37 @@ def delete_evidence_from_cloud(cloud_config, evidence, timeout=15):
         proxy_parsed = ProxyCloud.parse(proxy)
         client = MoodleClient(moodle_user, moodle_password, moodle_host, moodle_repo_id, proxy=proxy_parsed)
         
-        # Usar hilo con timeout
-        def login_and_delete():
-            if client.login():
-                # Buscar la evidencia exacta
-                all_evidences = client.getEvidences()
-                evidence_to_delete = None
-                
-                for ev in all_evidences:
-                    if ev.get('id') == evidence.get('id'):
-                        evidence_to_delete = ev
-                        break
-                
-                if evidence_to_delete:
-                    evidence_name = evidence_to_delete.get('name', '')
-                    files_count = len(evidence_to_delete.get('files', []))
-                    # Eliminar la evidencia
-                    client.deleteEvidence(evidence_to_delete)
-                    client.logout()
-                    # Invalidar caché
-                    cloud_cache.clear_cache()
-                    return True, evidence_name, files_count
-                else:
-                    client.logout()
-                    return False, "", 0
+        if client.login():
+            # Buscar la evidencia exacta
+            all_evidences = client.getEvidences()
+            evidence_to_delete = None
+            
+            for ev in all_evidences:
+                if ev.get('id') == evidence.get('id'):
+                    evidence_to_delete = ev
+                    break
+            
+            if evidence_to_delete:
+                evidence_name = evidence_to_delete.get('name', '')
+                files_count = len(evidence_to_delete.get('files', []))
+                # Eliminar la evidencia
+                client.deleteEvidence(evidence_to_delete)
+                client.logout()
+                # Invalidar caché
+                cloud_cache.clear_cache()
+                return True, evidence_name, files_count
             else:
+                client.logout()
                 return False, "", 0
-        
-        try:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(login_and_delete)
-                return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            print(f"Timeout eliminando evidencia de {moodle_host}")
-            return False, "Timeout", 0
+        else:
+            return False, "", 0
             
     except Exception as e:
         return False, f"Error: {str(e)}", 0
 
-def delete_all_evidences_from_cloud(cloud_config, timeout=30):
+def delete_all_evidences_from_cloud(cloud_config):
     """
-    Elimina todas las evidencias de una nube específica con timeout
+    Elimina todas las evidencias de una nube específica
     """
     try:
         moodle_host = cloud_config.get('moodle_host', '')
@@ -738,38 +699,27 @@ def delete_all_evidences_from_cloud(cloud_config, timeout=30):
         proxy_parsed = ProxyCloud.parse(proxy)
         client = MoodleClient(moodle_user, moodle_password, moodle_host, moodle_repo_id, proxy=proxy_parsed)
         
-        # Usar hilo con timeout
-        def login_and_delete_all():
-            if client.login():
-                # Obtener todas las evidencias
-                all_evidences = client.getEvidences()
-                deleted_count = 0
-                total_files = 0
-                
-                # Eliminar cada evidencia
-                for evidence in all_evidences:
-                    try:
-                        files_count = len(evidence.get('files', []))
-                        client.deleteEvidence(evidence)
-                        deleted_count += 1
-                        total_files += files_count
-                    except:
-                        pass
-                
-                client.logout()
-                # Invalidar caché
-                cloud_cache.clear_cache()
-                return True, deleted_count, total_files
-            else:
-                return False, 0, 0
-        
-        try:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(login_and_delete_all)
-                return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            print(f"Timeout eliminando todas las evidencias de {moodle_host}")
+        if client.login():
+            # Obtener todas las evidencias
+            all_evidences = client.getEvidences()
+            deleted_count = 0
+            total_files = 0
+            
+            # Eliminar cada evidencia
+            for evidence in all_evidences:
+                try:
+                    files_count = len(evidence.get('files', []))
+                    client.deleteEvidence(evidence)
+                    deleted_count += 1
+                    total_files += files_count
+                except:
+                    pass
+            
+            client.logout()
+            # Invalidar caché
+            cloud_cache.clear_cache()
+            return True, deleted_count, total_files
+        else:
             return False, 0, 0
             
     except Exception as e:
@@ -784,12 +734,12 @@ class AdminEvidenceManager:
         self.last_update = None
     
     def refresh_data(self, force=False):
-        """Actualiza los datos de evidencias (con caché y timeout)"""
+        """Actualiza los datos de evidencias (con caché)"""
         if not force and not cloud_cache.should_refresh():
             return len(self.current_list)
         
         try:
-            all_evidences = get_all_cloud_evidences_fast(use_cache=True, timeout=15)
+            all_evidences = get_all_cloud_evidences_fast(use_cache=True)
             self.clouds_dict = {}
             
             for evidence in all_evidences:
@@ -830,8 +780,8 @@ class AdminEvidenceManager:
             print(f"Error obteniendo evidencia: {e}")
         return None
     
-    def get_txt_for_evidence(self, cloud_idx, evid_idx, timeout=15):
-        """Obtiene el TXT de una evidencia con timeout"""
+    def get_txt_for_evidence(self, cloud_idx, evid_idx):
+        """Obtiene el TXT de una evidencia"""
         evidence = self.get_evidence(cloud_idx, evid_idx)
         if evidence:
             try:
@@ -847,41 +797,33 @@ class AdminEvidenceManager:
                 proxy_parsed = ProxyCloud.parse(proxy)
                 client = MoodleClient(moodle_user, moodle_password, moodle_host, moodle_repo_id, proxy=proxy_parsed)
                 
-                def login_and_get_files():
-                    if client.login():
-                        # Buscar la evidencia actualizada
-                        all_evidences = client.getEvidences()
-                        current_evidence = None
-                        
-                        for ev in all_evidences:
-                            if ev.get('id') == evidence_data.get('id'):
-                                current_evidence = ev
-                                break
-                        
-                        if current_evidence:
-                            files = current_evidence.get('files', [])
-                            
-                            # Preparar URLs
-                            for i in range(len(files)):
-                                url = files[i]['directurl']
-                                if '?forcedownload=1' in url:
-                                    url = url.replace('?forcedownload=1', '')
-                                elif '&forcedownload=1' in url:
-                                    url = url.replace('&forcedownload=1', '')
-                                if '&token=' in url and '?' not in url:
-                                    url = url.replace('&token=', '?token=', 1)
-                                files[i]['directurl'] = url
-                            
-                            client.logout()
-                            return files
-                        client.logout()
-                    return None
-                
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(login_and_get_files)
-                    return future.result(timeout=timeout)
+                if client.login():
+                    # Buscar la evidencia actualizada
+                    all_evidences = client.getEvidences()
+                    current_evidence = None
                     
+                    for ev in all_evidences:
+                        if ev.get('id') == evidence_data.get('id'):
+                            current_evidence = ev
+                            break
+                    
+                    if current_evidence:
+                        files = current_evidence.get('files', [])
+                        
+                        # Preparar URLs
+                        for i in range(len(files)):
+                            url = files[i]['directurl']
+                            if '?forcedownload=1' in url:
+                                url = url.replace('?forcedownload=1', '')
+                            elif '&forcedownload=1' in url:
+                                url = url.replace('&forcedownload=1', '')
+                            if '&token=' in url and '?' not in url:
+                                url = url.replace('&token=', '?token=', 1)
+                            files[i]['directurl'] = url
+                        
+                        client.logout()
+                        return files
+                    client.logout()
             except Exception as e:
                 print(f"Error obteniendo TXT: {e}")
         return None
@@ -935,20 +877,36 @@ def show_updated_cloud(bot, message, cloud_idx):
     """Muestra la lista actualizada de una nube después de eliminar"""
     try:
         # Obtener datos actualizados
-        admin_evidence_manager.refresh_data(force=True)
+        admin_evidence_manager.refresh_data(force=True)  # Forzar refresco después de eliminar
         cloud_names = list(admin_evidence_manager.clouds_dict.keys())
         
         # Verificar que el índice sea válido
         if cloud_idx < 0 or cloud_idx >= len(cloud_names):
+            # Si el índice es inválido, mostrar todas las nubes
             show_updated_all_clouds(bot, message)
             return
         
         cloud_name = cloud_names[cloud_idx]
         evidences = admin_evidence_manager.clouds_dict.get(cloud_name, [])
         
-        # ¡CONDICIÓN CLAVE! Si no hay evidencias, mostrar todas las nubes
+        # VERIFICACIÓN CRÍTICA: Si no hay evidencias, mostrar todas las nubes
         if not evidences:
-            show_updated_all_clouds(bot, message)
+            short_name = cloud_name.replace('https://', '').replace('http://', '').split('/')[0]
+            empty_msg = f"""
+📭 NUBE VACÍA
+━━━━━━━━━━━━━━━━━━━
+
+✅ ELIMINACIÓN COMPLETA
+☁️ {short_name}
+
+🎉 ¡Has eliminado todas las evidencias de esta nube!
+
+🔄 Regresando a todas las nubes...
+━━━━━━━━━━━━━━━━━━━
+            """
+            bot.editMessageText(message, empty_msg)
+            time.sleep(1.5)  # Breve pausa para que el usuario vea el mensaje
+            show_updated_all_clouds(bot, message)  # MOSTRAR TODAS LAS NUBES
             return
         
         short_name = cloud_name.replace('https://', '').replace('http://', '').split('/')[0]
@@ -1006,8 +964,19 @@ def show_updated_cloud(bot, message, cloud_idx):
         bot.editMessageText(message, list_msg)
         
     except Exception as e:
-        # Si hay error, mostrar todas las nubes
-        show_updated_all_clouds(bot, message)
+        # Manejo de error más amigable
+        error_msg = f"""
+❌ ERROR AL ACTUALIZAR
+━━━━━━━━━━━━━━━━━━━
+
+⚠️ No se pudo mostrar la nube actualizada.
+
+🔧 Solución:
+Usa /adm_allclouds para ver todas las nubes disponibles
+
+━━━━━━━━━━━━━━━━━━━
+        """
+        bot.editMessageText(message, error_msg)
 
 def show_updated_all_clouds(bot, message):
     """Muestra todas las nubes actualizadas después de una eliminación masiva"""
@@ -1024,6 +993,7 @@ def show_updated_all_clouds(bot, message):
                 total_files += ev['files_count']
         
         if total_evidences == 0:
+            # Si no hay evidencias en ninguna nube, mostrar mensaje simple
             empty_msg = f"""
 👑 TODAS LAS NUBES ACTUALIZADAS
 ━━━━━━━━━━━━━━━━━━━
@@ -1079,10 +1049,25 @@ def show_updated_all_clouds(bot, message):
         bot.editMessageText(message, menu_msg)
         
     except Exception as e:
-        bot.editMessageText(message, f'❌ Error al mostrar nubes: {str(e)[:100]}')
+        bot.editMessageText(message, f'❌ Error al mostrar nubes actualizadas: {str(e)}')
+
+def show_loading_progress(bot, message, step, total_steps=3):
+    """Muestra una barra de progreso para operaciones largas"""
+    progress_chars = ['○', '◔', '◑', '◕', '●']
+    progress = int((step / total_steps) * 4)
+    bar = progress_chars[progress] if progress < len(progress_chars) else progress_chars[-1]
+    
+    loading_msgs = [
+        "🔄 Conectando con las nubes...",
+        "📊 Procesando datos...",
+        "✅ Actualizando información..."
+    ]
+    
+    msg = loading_msgs[step-1] if step <= len(loading_msgs) else f"Procesando... ({step}/{total_steps})"
+    bot.editMessageText(message, f"{msg} {bar}")
 
 # ==============================
-# FUNCIÓN PRINCIPAL ONMESSAGE OPTIMIZADA
+# FUNCIÓN PRINCIPAL ONMESSAGE CORREGIDA
 # ==============================
 
 def onmessage(update,bot:ObigramClient):
@@ -1273,25 +1258,15 @@ Aún no se ha realizado ninguna acción en el bot.
             
             # COMANDOS CON /adm_
             elif '/adm_' in msgText:
-                # /adm_allclouds - OPTIMIZADO
+                # /adm_allclouds
                 if '/adm_allclouds' in msgText:
                     try:
-                        bot.editMessageText(message, '🔄 Actualizando nubes...')
-                        
-                        # Usar hilo para evitar bloqueo
-                        def refresh_data_thread():
-                            return admin_evidence_manager.refresh_data()
-                        
-                        try:
-                            import concurrent.futures
-                            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                                future = executor.submit(refresh_data_thread)
-                                total_evidences = future.result(timeout=20)  # Timeout 20 segundos
-                        except:
-                            bot.editMessageText(message, '⚠️ Timeout al conectar con las nubes')
-                            return
+                        show_loading_progress(bot, message, 1, 3)
+                        total_evidences = admin_evidence_manager.refresh_data()
+                        show_loading_progress(bot, message, 2, 3)
                         
                         if total_evidences == 0:
+                            # Mensaje cuando no hay evidencias
                             empty_msg = f"""
 👑 TODAS LAS NUBES
 ━━━━━━━━━━━━━━━━━━━
@@ -1341,6 +1316,8 @@ Aún no se ha realizado ninguna acción en el bot.
                             
                             cloud_index += 1
                         
+                        show_loading_progress(bot, message, 3, 3)
+                        
                         if total_evidences > 0:
                             menu_msg += f"""
 
@@ -1362,7 +1339,7 @@ Aún no se ha realizado ninguna acción en el bot.
                         bot.editMessageText(message, menu_msg)
                         
                     except Exception as e:
-                        bot.editMessageText(message, f'❌ Error: {str(e)[:100]}')
+                        bot.editMessageText(message, f'❌ Error: {str(e)}')
                     return
                 
                 # /adm_cloud_X
@@ -1373,7 +1350,7 @@ Aún no se ha realizado ninguna acción en el bot.
                             bot.editMessageText(message, '❌ Formato incorrecto. Use: /adm_cloud_0')
                             return
                         
-                        # Refrescar datos primero
+                        # Refrescar datos primero (con caché)
                         admin_evidence_manager.refresh_data()
                         
                         if cloud_idx < 0 or cloud_idx >= len(admin_evidence_manager.clouds_dict):
@@ -1450,7 +1427,7 @@ Aún no se ha realizado ninguna acción en el bot.
                         bot.editMessageText(message, list_msg)
                         
                     except Exception as e:
-                        bot.editMessageText(message, f'❌ Error: {str(e)[:100]}')
+                        bot.editMessageText(message, f'❌ Error: {str(e)}')
                     return
                 
                 # /adm_show_X_Y
@@ -1499,10 +1476,10 @@ Aún no se ha realizado ninguna acción en el bot.
                             bot.editMessageText(message, '❌ No se encontró la evidencia')
                             
                     except Exception as e:
-                        bot.editMessageText(message, f'❌ Error: {str(e)[:100]}')
+                        bot.editMessageText(message, f'❌ Error: {str(e)}')
                     return
                 
-                # /adm_fetch_X_Y - OPTIMIZADO
+                # /adm_fetch_X_Y
                 elif '/adm_fetch_' in msgText:
                     try:
                         params = extract_two_params_simple(msgText, '/adm_fetch_')
@@ -1514,8 +1491,7 @@ Aún no se ha realizado ninguna acción en el bot.
                         
                         bot.editMessageText(message, '📄 Obteniendo archivo TXT...')
                         
-                        # Obtener TXT con timeout
-                        files = admin_evidence_manager.get_txt_for_evidence(cloud_idx, evid_idx, timeout=15)
+                        files = admin_evidence_manager.get_txt_for_evidence(cloud_idx, evid_idx)
                         
                         if files:
                             evidence = admin_evidence_manager.get_evidence(cloud_idx, evid_idx)
@@ -1553,10 +1529,10 @@ Aún no se ha realizado ninguna acción en el bot.
                             bot.editMessageText(message, '❌ No hay archivos en esta evidencia')
                             
                     except Exception as e:
-                        bot.editMessageText(message, f'❌ Error: {str(e)[:100]}')
+                        bot.editMessageText(message, f'❌ Error: {str(e)}')
                     return
                 
-                # /adm_delete_X_Y - ¡CORRECCIÓN PRINCIPAL CON CONDICIÓN!
+                # /adm_delete_X_Y - ¡CORRECCIÓN PRINCIPAL!
                 elif '/adm_delete_' in msgText:
                     try:
                         params = extract_two_params_simple(msgText, '/adm_delete_')
@@ -1566,14 +1542,14 @@ Aún no se ha realizado ninguna acción en el bot.
                         
                         cloud_idx, evid_idx = params
                         
-                        bot.editMessageText(message, '🗑️ Eliminando...')
+                        bot.editMessageText(message, '🔍 Verificando datos...')
                         
                         # Obtener datos actuales
                         admin_evidence_manager.refresh_data()
                         cloud_names = list(admin_evidence_manager.clouds_dict.keys())
                         
                         if cloud_idx < 0 or cloud_idx >= len(cloud_names):
-                            bot.editMessageText(message, f'❌ Índice inválido')
+                            bot.editMessageText(message, f'❌ Índice de nube inválido')
                             show_updated_all_clouds(bot, message)
                             return
                         
@@ -1581,12 +1557,12 @@ Aún no se ha realizado ninguna acción en el bot.
                         evidences = admin_evidence_manager.clouds_dict.get(cloud_name, [])
                         
                         if not evidences:
-                            bot.editMessageText(message, f'📭 La nube ya está vacía')
+                            bot.editMessageText(message, f'📭 La nube {cloud_idx} ya está vacía')
                             show_updated_all_clouds(bot, message)
                             return
                         
                         if evid_idx < 0 or evid_idx >= len(evidences):
-                            bot.editMessageText(message, f'❌ Índice inválido')
+                            bot.editMessageText(message, f'❌ Índice de evidencia inválido')
                             return
                         
                         evidence = evidences[evid_idx]
@@ -1600,15 +1576,18 @@ Aún no se ha realizado ninguna acción en el bot.
                                 clean_name = ev_name.replace(marker, "").strip()
                                 break
                         
-                        # Eliminar con timeout
+                        short_name = cloud_name.replace('https://', '').replace('http://', '').split('/')[0]
+                        
+                        bot.editMessageText(message, f'🗑️ Eliminando evidencia: {clean_name[:50]}...')
+                        
+                        # Eliminar
                         success, ev_name, files_count = delete_evidence_from_cloud(
                             evidence['cloud_config'], 
-                            evidence['evidence_data'],
-                            timeout=15
+                            evidence['evidence_data']
                         )
                         
                         if success:
-                            # Refrescar datos después de eliminar
+                            # Refrescar datos
                             admin_evidence_manager.refresh_data(force=True)
                             
                             # Obtener datos actualizados
@@ -1617,38 +1596,49 @@ Aún no se ha realizado ninguna acción en el bot.
                             if cloud_idx < len(cloud_names):
                                 current_evidences = admin_evidence_manager.clouds_dict.get(cloud_names[cloud_idx], [])
                                 
-                                # ¡CONDICIÓN CLAVE! Si quedó en 0, mostrar todas las nubes
-                                if len(current_evidences) == 0:
-                                    # Nube vacía - redirigir a todas las nubes
-                                    short_name = cloud_name.replace('https://', '').replace('http://', '').split('/')[0]
-                                    
+                                if current_evidences:
+                                    # Si aún hay evidencias, mostrar esta nube actualizada
+                                    result_msg = f"""
+✅ ELIMINACIÓN EXITOSA
+━━━━━━━━━━━━━━━━━━━
+
+🗑️ Evidencia: {clean_name[:50]}
+{'...' if len(clean_name) > 50 else ''}
+📁 Archivos eliminados: {files_count}
+☁️ Nube: {short_name}
+
+🔄 Mostrando nube actualizada...
+━━━━━━━━━━━━━━━━━━━
+                                    """
+                                    bot.editMessageText(message, result_msg)
+                                    time.sleep(1)
+                                    show_updated_cloud(bot, message, cloud_idx)
+                                else:
+                                    # Si NO hay evidencias, mostrar todas las nubes
                                     result_msg = f"""
 ✅ ELIMINACIÓN COMPLETA
 ━━━━━━━━━━━━━━━━━━━
 
+🗑️ Última evidencia eliminada de esta nube
 📁 Archivos borrados: {files_count}
-☁️ Nube: {short_name}
 
 🔄 Mostrando todas las nubes...
 ━━━━━━━━━━━━━━━━━━━
                                     """
                                     bot.editMessageText(message, result_msg)
                                     time.sleep(1)
-                                    show_updated_all_clouds(bot, message)  # ¡MOSTRAR TODAS LAS NUBES!
-                                else:
-                                    # Aún hay evidencias - mostrar esta nube
-                                    show_updated_cloud(bot, message, cloud_idx)
+                                    show_updated_all_clouds(bot, message)  # MOSTRAR TODAS LAS NUBES
                             else:
-                                # Si la nube ya no existe en la lista, mostrar todas
+                                # Si por alguna razón la nube ya no está en la lista
                                 show_updated_all_clouds(bot, message)
                         else:
-                            bot.editMessageText(message, '❌ Error al eliminar')
+                            bot.editMessageText(message, f'❌ Error al eliminar: {clean_name}')
                             
                     except Exception as e:
-                        bot.editMessageText(message, f'❌ Error: {str(e)[:100]}')
+                        bot.editMessageText(message, f'❌ Error: {str(e)}')
                     return
                 
-                # /adm_wipe_X - OPTIMIZADO
+                # /adm_wipe_X
                 elif '/adm_wipe_' in msgText:
                     try:
                         cloud_idx = extract_one_param_simple(msgText, '/adm_wipe_')
@@ -1656,27 +1646,22 @@ Aún no se ha realizado ninguna acción en el bot.
                             bot.editMessageText(message, '❌ Formato incorrecto. Use: /adm_wipe_0')
                             return
                         
-                        # Verificar datos
-                        admin_evidence_manager.refresh_data()
-                        
                         if cloud_idx < 0 or cloud_idx >= len(admin_evidence_manager.clouds_dict):
-                            bot.editMessageText(message, f'❌ Índice inválido')
+                            bot.editMessageText(message, f'❌ Índice inválido. Máximo: {len(admin_evidence_manager.clouds_dict)-1}')
                             return
                         
                         cloud_name = list(admin_evidence_manager.clouds_dict.keys())[cloud_idx]
                         evidences = admin_evidence_manager.clouds_dict[cloud_name]
                         
                         if not evidences:
-                            bot.editMessageText(message, f'📭 La nube ya está vacía')
-                            show_updated_all_clouds(bot, message)
+                            bot.editMessageText(message, f'📭 La nube {cloud_idx} ya está vacía')
                             return
                         
                         total_evidences = len(evidences)
                         total_files = sum(e['files_count'] for e in evidences)
                         short_name = cloud_name.replace('https://', '').replace('http://', '').split('/')[0]
                         
-                        # ACCIÓN DIRECTA - SIN CONFIRMACIÓN
-                        bot.editMessageText(message, f'💣 Eliminando {total_evidences} evidencias de {short_name}...')
+                        bot.editMessageText(message, f'💣 Limpiando nube {short_name}...')
                         
                         cloud_config = None
                         for user_group, config in PRE_CONFIGURATED_USERS.items():
@@ -1685,19 +1670,18 @@ Aún no se ha realizado ninguna acción en el bot.
                                 break
                         
                         if cloud_config:
-                            success, deleted_count, files_deleted = delete_all_evidences_from_cloud(cloud_config, timeout=30)
+                            success, deleted_count, total_files = delete_all_evidences_from_cloud(cloud_config)
                             
                             if success:
                                 admin_evidence_manager.refresh_data(force=True)
                                 
-                                # Mensaje directo de éxito
                                 result_msg = f"""
-✅ NUBE VACIADA
+💥 LIMPIEZA COMPLETA EXITOSA
 ━━━━━━━━━━━━━━━━━━━
 
-☁️ {short_name}
-📁 Evidencias eliminadas: {deleted_count}
-🗑️ Archivos borrados: {files_deleted}
+✅ Nube: {short_name}
+✅ Evidencias eliminadas: {deleted_count}
+✅ Archivos borrados: {total_files}
 
 🔄 Mostrando todas las nubes...
 ━━━━━━━━━━━━━━━━━━━
@@ -1706,35 +1690,37 @@ Aún no se ha realizado ninguna acción en el bot.
                                 bot.editMessageText(message, result_msg)
                                 time.sleep(1)
                                 
-                                # Redirigir automáticamente a todas las nubes
                                 show_updated_all_clouds(bot, message)
                             else:
-                                bot.editMessageText(message, f'❌ Error al limpiar {short_name}')
+                                bot.editMessageText(message, f'❌ Error al limpiar la nube {short_name}')
                         else:
-                            bot.editMessageText(message, '❌ No se encontró configuración')
+                            bot.editMessageText(message, '❌ No se encontró configuración para esta nube')
                             
                     except Exception as e:
-                        bot.editMessageText(message, f'❌ Error: {str(e)[:100]}')
+                        bot.editMessageText(message, f'❌ Error: {str(e)}')
                     return
                 
-                # /adm_nuke - OPTIMIZADO
+                # /adm_nuke
                 elif '/adm_nuke' in msgText:
                     try:
-                        # ACCIÓN DIRECTA - SIN CONFIRMACIÓN
-                        bot.editMessageText(message, '💣 Eliminando todo de todas las nubes...')
+                        total_clouds = len(admin_evidence_manager.clouds_dict)
+                        total_evidences = len(admin_evidence_manager.current_list)
+                        total_files = 0
+                        
+                        for cloud_name, evidences in admin_evidence_manager.clouds_dict.items():
+                            for ev in evidences:
+                                total_files += ev['files_count']
+                        
+                        if total_evidences == 0:
+                            bot.editMessageText(message, '📭 No hay evidencias para eliminar')
+                            return
+                        
+                        bot.editMessageText(message, '💣💣💣 ELIMINANDO TODO DE TODAS LAS NUBES...')
                         
                         results = []
                         deleted_total = 0
                         files_total = 0
                         
-                        # Usar threads para eliminar en paralelo
-                        def delete_cloud(cloud_name, cloud_config):
-                            success, deleted_count, total_files = delete_all_evidences_from_cloud(cloud_config, timeout=30)
-                            if success:
-                                return cloud_name, deleted_count, total_files
-                            return cloud_name, 0, 0
-                        
-                        threads = []
                         for cloud_name, evidences in admin_evidence_manager.clouds_dict.items():
                             cloud_config = None
                             for user_group, config in PRE_CONFIGURATED_USERS.items():
@@ -1743,55 +1729,48 @@ Aún no se ha realizado ninguna acción en el bot.
                                     break
                             
                             if cloud_config:
-                                t = threading.Thread(target=lambda cn=cloud_name, cc=cloud_config: results.append(delete_cloud(cn, cc)))
-                                t.start()
-                                threads.append(t)
-                        
-                        # Esperar a que terminen todos los threads
-                        for t in threads:
-                            t.join(timeout=35)
-                        
-                        # Procesar resultados
-                        for result in results:
-                            if isinstance(result, tuple) and len(result) == 3:
-                                cloud_name, deleted_count, total_files = result
-                                deleted_total += deleted_count
-                                files_total += total_files
+                                success, deleted_count, total_files = delete_all_evidences_from_cloud(cloud_config)
                                 
-                                short_name = cloud_name.replace('https://', '').replace('http://', '').split('/')[0]
-                                results.append(f"✅ {short_name}: {deleted_count} evidencias")
+                                if success:
+                                    deleted_total += deleted_count
+                                    files_total += total_files
+                                    
+                                    short_name = cloud_name.replace('https://', '').replace('http://', '').split('/')[0]
+                                    results.append(f"✅ {short_name}: {deleted_count} evidencias, {total_files} archivos")
+                                else:
+                                    short_name = cloud_name.replace('https://', '').replace('http://', '').split('/')[0]
+                                    results.append(f"❌ {short_name}: Error al eliminar")
                         
                         admin_evidence_manager.refresh_data(force=True)
                         
-                        # Mensaje directo de resultado
                         final_msg = f"""
-✅ ELIMINACIÓN COMPLETA
+💥💥💥 ELIMINACIÓN MASIVA COMPLETADA 💥💥💥
 ━━━━━━━━━━━━━━━━━━━
 
-📊 RESULTADOS:
+📊 RESULTADOS FINALES:
+• Nubes procesadas: {len(results)}
 • Evidencias eliminadas: {deleted_total}
 • Archivos borrados: {files_total}
-• Nubes procesadas: {len(results)}
 
 ━━━━━━━━━━━━━━━━━━━
-📋 DETALLE:
+📋 DETALLE POR NUBE:
 """
                         
                         for result in results:
-                            if isinstance(result, str):
-                                final_msg += f"\n{result}"
+                            final_msg += f"\n{result}"
                         
                         final_msg += f"""
 
 ━━━━━━━━━━━━━━━━━━━
-📭 Todas las nubes están vacías
+✅ Todas las nubes han sido limpiadas.
+📭 No quedan evidencias en ninguna nube.
 ━━━━━━━━━━━━━━━━━━━
                         """
                         
                         bot.editMessageText(message, final_msg)
                         
                     except Exception as e:
-                        bot.editMessageText(message, f'❌ Error: {str(e)[:100]}')
+                        bot.editMessageText(message, f'❌ Error: {str(e)}')
                     return
                 
                 # COMANDOS DE ESTADÍSTICAS DE ADMIN
@@ -1832,7 +1811,7 @@ Aún no se ha realizado ninguna acción en el bot.
                         
                         bot.editMessageText(message, logs_msg)
                     except Exception as e:
-                        bot.editMessageText(message, f"❌ Error al obtener logs: {str(e)[:100]}")
+                        bot.editMessageText(message, f"❌ Error al obtener logs: {str(e)}")
                     return
                 
                 elif '/adm_users' in msgText:
@@ -1858,7 +1837,7 @@ Aún no se ha realizado ninguna acción en el bot.
                         
                         bot.editMessageText(message, users_msg)
                     except Exception as e:
-                        bot.editMessageText(message, f"❌ Error al obtener usuarios: {str(e)[:100]}")
+                        bot.editMessageText(message, f"❌ Error al obtener usuarios: {str(e)}")
                     return
                 
                 elif '/adm_uploads' in msgText:
@@ -1880,7 +1859,7 @@ Aún no se ha realizado ninguna acción en el bot.
                         
                         bot.editMessageText(message, uploads_msg)
                     except Exception as e:
-                        bot.editMessageText(message, f"❌ Error al obtener subidas: {str(e)[:100]}")
+                        bot.editMessageText(message, f"❌ Error al obtener subidas: {str(e)}")
                     return
                 
                 elif '/adm_deletes' in msgText:
@@ -1910,7 +1889,7 @@ Aún no se ha realizado ninguna acción en el bot.
                         
                         bot.editMessageText(message, deletes_msg)
                     except Exception as e:
-                        bot.editMessageText(message, f"❌ Error al obtener eliminaciones: {str(e)[:100]}")
+                        bot.editMessageText(message, f"❌ Error al obtener eliminaciones: {str(e)}")
                     return
                 
                 elif '/adm_cleardata' in msgText:
@@ -1922,7 +1901,7 @@ Aún no se ha realizado ninguna acción en el bot.
                         result = memory_stats.clear_all_data()
                         bot.editMessageText(message, f"✅ {result}")
                     except Exception as e:
-                        bot.editMessageText(message, f"❌ Error al limpiar datos: {str(e)[:100]}")
+                        bot.editMessageText(message, f"❌ Error al limpiar datos: {str(e)}")
                     return
         
         # ============================================
@@ -2054,7 +2033,7 @@ Aún no se ha realizado ninguna acción en el bot.
             except ValueError:
                 bot.editMessageText(message, '❌ Formato incorrecto. Use: /txt_0 (donde 0 es el número de la evidencia)')
             except Exception as e:
-                bot.editMessageText(message, f'❌ Error: {str(e)[:100]}')
+                bot.editMessageText(message, f'❌ Error: {str(e)}')
                 print(f"Error en /txt_: {e}")
              
         # COMANDO /del_X (para todos)
@@ -2137,7 +2116,7 @@ Aún no se ha realizado ninguna acción en el bot.
             except ValueError:
                 bot.editMessageText(message, '❌ Formato incorrecto. Use: /del_0 (donde 0 es el número de la evidencia)')
             except Exception as e:
-                bot.editMessageText(message, f'❌ Error: {str(e)[:100]}')
+                bot.editMessageText(message, f'❌ Error: {str(e)}')
                 print(f"Error en /del_: {e}")
                 
         # COMANDO /delall (para todos)
@@ -2199,7 +2178,7 @@ Aún no se ha realizado ninguna acción en el bot.
                 else:
                     bot.editMessageText(message,'➲ Error y Causas🧐\n1-Revise su Cuenta\n2-Servidor Deshabilitado: '+client.path)
             except Exception as e:
-                bot.editMessageText(message, f'❌ Error: {str(e)[:100]}')
+                bot.editMessageText(message, f'❌ Error: {str(e)}')
                 print(f"Error en /delall: {e}")
                 
         # PROCESAR ENLACES HTTP (para todos)
