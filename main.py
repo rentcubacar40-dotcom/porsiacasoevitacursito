@@ -653,46 +653,51 @@ def delete_all_evidences_from_cloud(cloud_config):
         return False, 0, 0
 
 # ==============================
-# FUNCIONES SEGURAS PARA EXTRACCIÓN DE PARÁMETROS MEJORADAS
+# FUNCIONES MEJORADAS PARA EXTRACCIÓN DE PARÁMETROS
 # ==============================
 
 def safe_extract_two_params(msgText, prefix):
     """
-    Extrae dos parámetros de forma segura sin errores de 'str' object
+    Extrae dos parámetros de forma segura - VERSIÓN MEJORADA
     """
     try:
         if prefix in msgText:
-            # Remover el prefijo
-            clean_text = msgText.replace(prefix, "")
-            parts = clean_text.strip('_').split('_')
+            # Extraer la parte después del prefijo
+            parts_str = msgText[len(prefix):]
+            
+            # Separar por guiones bajos y limpiar
+            parts = [p.strip() for p in parts_str.split('_') if p.strip()]
             
             if len(parts) >= 2:
-                # Tomar solo los primeros dos parámetros
-                param1_str = parts[0].strip()
-                param2_str = parts[1].strip()
+                param1 = parts[0]
+                param2 = parts[1]
                 
-                # Verificar que sean dígitos
-                if param1_str.isdigit() and param2_str.isdigit():
-                    return [int(param1_str), int(param2_str)]
+                # Verificar que ambos sean números
+                if param1.isdigit() and param2.isdigit():
+                    return [int(param1), int(param2)]
+                else:
+                    print(f"Parámetros no numéricos: '{param1}', '{param2}'")
     except Exception as e:
-        print(f"Error extrayendo parámetros: {e}")
+        print(f"Error en safe_extract_two_params: {e}")
     return None
 
 def safe_extract_one_param(msgText, prefix):
     """
-    Extrae un parámetro de forma segura
+    Extrae un parámetro de forma segura - VERSIÓN MEJORADA
     """
     try:
         if prefix in msgText:
-            clean_text = msgText.replace(prefix, "")
-            parts = clean_text.strip('_').split('_')
+            # Extraer la parte después del prefijo
+            parts_str = msgText[len(prefix):]
+            
+            # Separar por guiones bajos y limpiar
+            parts = [p.strip() for p in parts_str.split('_') if p.strip()]
             
             for part in parts:
-                part = part.strip()
                 if part.isdigit():
                     return int(part)
     except Exception as e:
-        print(f"Error extrayendo parámetro: {e}")
+        print(f"Error en safe_extract_one_param: {e}")
     return None
 
 def show_updated_cloud(bot, message, cloud_idx):
@@ -974,7 +979,7 @@ def onmessage(update,bot:ObigramClient):
         thread.store('msg',message)
 
         # ============================================
-        # COMANDO /start MEJORADO PARA ADMINISTRADOR
+        # COMANDO /start MEJORADO (SIN LISTA DE USUARIOS)
         # ============================================
         if '/start' in msgText:
             if username == ADMIN_USERNAME:
@@ -987,8 +992,6 @@ def onmessage(update,bot:ObigramClient):
 ⚠️ NOTA IMPORTANTE:
 • Tienes acceso de administrador a TODAS las nubes
 • Puedes gestionar evidencias de todos los usuarios
-
-📊 NUBES CONFIGURADAS: {len(PRE_CONFIGURATED_USERS)}
 
 🎯 COMANDOS PRINCIPALES:
 /admin - Panel principal de administración
@@ -1114,29 +1117,18 @@ Aún no se ha realizado ninguna acción en el bot.
             return
         
         # ============================================
-        # COMANDO /adm_allclouds - VER TODAS LAS NUBES
+        # COMANDO /adm_allclouds - VER TODAS LAS NUBES (SIN REFRESH)
         # ============================================
         elif username == ADMIN_USERNAME and '/adm_allclouds' in msgText:
             try:
-                refresh_needed = False
-                if admin_evidence_manager.last_update is None:
-                    refresh_needed = True
-                else:
-                    now = datetime.datetime.now()
-                    if admin_evidence_manager.last_update:
-                        time_diff = now - admin_evidence_manager.last_update
-                        if time_diff.total_seconds() > 300:
-                            refresh_needed = True
+                # SIEMPRE refrescar datos al usar este comando
+                bot.editMessageText(message, '🔄 Actualizando lista de nubes...')
+                total_evidences = admin_evidence_manager.refresh_data()
                 
-                if refresh_needed or '_refresh' in msgText:
-                    bot.editMessageText(message, '🔄 Actualizando lista de nubes...')
-                    total_evidences = admin_evidence_manager.refresh_data()
-                    
-                    if total_evidences == 0:
-                        bot.editMessageText(message, '📭 No se encontraron evidencias en ninguna nube')
-                        return
+                if total_evidences == 0:
+                    bot.editMessageText(message, '📭 No se encontraron evidencias en ninguna nube')
+                    return
                 
-                total_evidences = len(admin_evidence_manager.current_list)
                 total_clouds = len(admin_evidence_manager.clouds_dict)
                 total_files = 0
                 
@@ -1173,8 +1165,7 @@ Aún no se ha realizado ninguna acción en el bot.
                     menu_msg += f"""
 
 ━━━━━━━━━━━━━━━━━━━
-🔧 OPCIONES RÁPIDAS:
-/adm_allclouds_refresh - Actualizar lista
+🔧 OPCIONES MASIVAS:
 /adm_nuke - ⚠️ Eliminar TODO (peligro)
 ━━━━━━━━━━━━━━━━━━━
 ℹ️ Usa /adm_cloud_X para ver evidencias de una nube
@@ -1308,7 +1299,6 @@ Aún no se ha realizado ninguna acción en el bot.
                             clean_name = ev_name.replace(marker, "").strip()
                             break
                     
-                    # MENSAJE MODIFICADO: SE ELIMINÓ LA LÍNEA DEL TAMAÑO
                     show_msg = f"""
 👁️ DETALLES DE EVIDENCIA
 ━━━━━━━━━━━━━━━━━━━
