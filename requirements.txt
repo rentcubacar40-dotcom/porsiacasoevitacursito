@@ -12,4 +12,5 @@ requests_toolbelt
 telethon
 tenacity
 pytz
+pillow
 
