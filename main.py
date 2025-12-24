@@ -22,6 +22,11 @@ import traceback
 import random
 import pytz
 import threading
+import requests
+import tempfile
+from PIL import Image
+import io
+from urllib.parse import urlparse
 
 # CONFIGURACIÓN FIJA EN EL CÓDIGO
 BOT_TOKEN = "8410047906:AAGntGHmkIuIvovBMQfy-gko2JTw3TNJsak"
@@ -34,6 +39,9 @@ try:
     CUBA_TZ = pytz.timezone('America/Havana')
 except:
     CUBA_TZ = None
+
+# URL DEL THUMBNAIL (MODIFICA ESTA URL CON LA TUYA)
+THUMBNAIL_URL = "https://raw.githubusercontent.com/rentcubacar40-dotcom/ThaliElielUff/refs/heads/main/1A00B1DF-A44D-4DCB-B3FE-375DDA8CA507.png"  # ← CAMBIA ESTA URL
 
 # SEPARADOR PARA EVIDENCIAS POR USUARIO
 USER_EVIDENCE_MARKER = " "  # Espacio como separador
@@ -74,6 +82,83 @@ PRE_CONFIGURATED_USERS = {
         "tokenize": 0
     }
 }
+
+# ==============================
+# SISTEMA DE THUMBNAILS DESDE URL
+# ==============================
+
+class ThumbnailManager:
+    """Gestor de thumbnails descargados desde una URL global"""
+    
+    def __init__(self, thumbnail_url=None):
+        """Inicializa el gestor de thumbnails"""
+        self.thumbnail_url = thumbnail_url or THUMBNAIL_URL
+        self.thumbnail_path = None
+        self.thumbnail_data = None
+        self.last_download_time = None
+        self.cache_duration = 3600  # 1 hora en segundos
+        
+    def download_thumbnail(self):
+        """Descarga el thumbnail desde la URL global"""
+        try:
+            if not self.thumbnail_url or self.thumbnail_url.strip() == "":
+                print("⚠️ No hay URL de thumbnail configurada")
+                return False
+            
+            print(f"📥 Descargando thumbnail desde: {self.thumbnail_url}")
+            
+            # Descargar la imagen
+            response = requests.get(self.thumbnail_url, timeout=10)
+            response.raise_for_status()
+            
+            # Cargar y procesar la imagen
+            image = Image.open(io.BytesIO(response.content))
+            
+            # Redimensionar si es muy grande (máx 320x320 para thumbnails de Telegram)
+            max_size = (320, 320)
+            image.thumbnail(max_size, Image.Resampling.LANCZOS)
+            
+            # Convertir a RGB si es necesario
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            
+            # Guardar en memoria
+            img_byte_arr = io.BytesIO()
+            image.save(img_byte_arr, format='JPEG', quality=85)
+            self.thumbnail_data = img_byte_arr.getvalue()
+            
+            self.last_download_time = datetime.datetime.now()
+            print("✅ Thumbnail descargado correctamente")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error al descargar thumbnail: {str(e)}")
+            return False
+    
+    def get_thumbnail(self):
+        """Obtiene el thumbnail (descarga si es necesario)"""
+        try:
+            # Si ya tenemos datos y no han pasado más de cache_duration segundos
+            if (self.thumbnail_data and self.last_download_time and 
+                (datetime.datetime.now() - self.last_download_time).seconds < self.cache_duration):
+                return self.thumbnail_data
+            
+            # Si no tenemos datos o han caducado, descargar
+            if self.download_thumbnail():
+                return self.thumbnail_data
+            else:
+                return None
+                
+        except Exception as e:
+            print(f"Error obteniendo thumbnail: {e}")
+            return None
+    
+    def has_thumbnail(self):
+        """Verifica si hay thumbnail disponible"""
+        return self.get_thumbnail() is not None
+
+# Crear instancia global del gestor de thumbnails
+thumbnail_manager = ThumbnailManager()
 
 # ==============================
 # SISTEMA DE CACHÉ PARA OPTIMIZACIÓN
@@ -525,27 +610,72 @@ def ddl(update,bot,message,url,file_name='',thread=None,jdb=None):
                 bot.editMessageText(message,'➥ Error en la descarga ✗')
 
 def sendTxt(name,files,update,bot):
-    txt = open(name,'w')
-    
-    for i, f in enumerate(files):
-        url = f['directurl']
+    """Envía un archivo TXT con thumbnail desde URL"""
+    try:
+        # Crear el archivo TXT
+        txt = open(name,'w')
         
-        if '?forcedownload=1' in url:
-            url = url.replace('?forcedownload=1', '')
-        elif '&forcedownload=1' in url:
-            url = url.replace('&forcedownload=1', '')
+        for i, f in enumerate(files):
+            url = f['directurl']
+            
+            if '?forcedownload=1' in url:
+                url = url.replace('?forcedownload=1', '')
+            elif '&forcedownload=1' in url:
+                url = url.replace('&forcedownload=1', '')
+            
+            if '&token=' in url and '?' not in url:
+                url = url.replace('&token=', '?token=', 1)
+            
+            txt.write(url)
+            
+            if i < len(files) - 1:
+                txt.write('\n\n')
         
-        if '&token=' in url and '?' not in url:
-            url = url.replace('&token=', '?token=', 1)
+        txt.close()
         
-        txt.write(url)
+        # Obtener el thumbnail desde la URL global
+        thumbnail_data = thumbnail_manager.get_thumbnail()
         
-        if i < len(files) - 1:
-            txt.write('\n\n')
-    
-    txt.close()
-    bot.sendFile(update.message.chat.id,name)
-    os.unlink(name)
+        # Enviar el archivo TXT con thumbnail si está disponible
+        if thumbnail_data:
+            try:
+                # Crear un archivo temporal para el thumbnail
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_thumb:
+                    temp_thumb.write(thumbnail_data)
+                    temp_thumb_path = temp_thumb.name
+                
+                # Enviar el archivo con thumbnail
+                with open(temp_thumb_path, 'rb') as thumb_file, open(name, 'rb') as txt_file:
+                    bot.sendDocument(
+                        chat_id=update.message.chat.id,
+                        document=txt_file,
+                        filename=os.path.basename(name),
+                        thumb=thumb_file
+                    )
+                
+                # Eliminar archivo temporal del thumbnail
+                os.unlink(temp_thumb_path)
+                
+            except Exception as e:
+                print(f"Error enviando con thumbnail: {e}")
+                # Fallback: enviar sin thumbnail
+                bot.sendFile(update.message.chat.id, name)
+        else:
+            # Enviar sin thumbnail
+            bot.sendFile(update.message.chat.id, name)
+        
+        # Eliminar el archivo TXT temporal
+        os.unlink(name)
+        
+    except Exception as e:
+        print(f"Error en sendTxt: {e}")
+        # Intentar enviar de forma simple si hay error
+        try:
+            bot.sendFile(update.message.chat.id, name)
+            if os.path.exists(name):
+                os.unlink(name)
+        except:
+            pass
 
 def initialize_database(jdb):
     expanded_users = expand_user_groups()
@@ -1510,17 +1640,9 @@ Aún no se ha realizado ninguna acción en el bot.
                                     safe_name = f"evidencia_{cloud_idx}_{evid_idx}"
                                 
                                 txtname = f"{safe_name}.txt"
-                                txt = open(txtname, 'w')
                                 
-                                for i, f in enumerate(files):
-                                    url = f['directurl']
-                                    txt.write(url)
-                                    if i < len(files) - 1:
-                                        txt.write('\n\n')
-                                
-                                txt.close()
-                                bot.sendFile(update.message.chat.id, txtname)
-                                os.unlink(txtname)
+                                # Enviar el TXT con thumbnail
+                                sendTxt(txtname, files, update, bot)
                                 
                                 bot.editMessageText(message, f'✅ TXT enviado: {clean_name[:50]}')
                             else:
@@ -2024,10 +2146,11 @@ Aún no se ha realizado ninguna acción en el bot.
                     
                     txtname = clean_name + '.txt'
                     
+                    # Enviar el TXT con thumbnail desde URL
                     sendTxt(txtname, evindex['files'], update, bot)
                     
                     client.logout()
-                    bot.editMessageText(message,'📄 TXT Aquí')
+                    bot.editMessageText(message,'📄 TXT Aquí (con thumbnail personalizado)')
                 else:
                     bot.editMessageText(message,'➲ Error y Causas🧐\n1-Revise su Cuenta\n2-Servidor Deshabilitado: '+client.path)
             except ValueError:
@@ -2112,7 +2235,7 @@ Aún no se ha realizado ninguna acción en el bot.
                         bot.editMessageText(message, confirmation_msg)
                     
                 else:
-                    bot.editMessageText(message,'➲ Error y Causas🧐\n1-Revise su Cuenta\n2-Servidor Deshabilitado: '+client.path)
+                    bot.editMessageText(message,'➲ Error y Causas🧐\n11-Revise su Cuenta\n2-Servidor Deshabilitado: '+client.path)
             except ValueError:
                 bot.editMessageText(message, '❌ Formato incorrecto. Use: /del_0 (donde 0 es el número de la evidencia)')
             except Exception as e:
