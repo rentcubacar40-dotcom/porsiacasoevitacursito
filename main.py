@@ -1804,7 +1804,7 @@ Aún no se ha realizado ninguna acción en el bot.
                                 if log['type'] == 'delete_all':
                                     logs_msg += f"├ {log['timestamp']} - @{log['username']}: ELIMINÓ TODO ({log.get('deleted_evidences', 1)} evidencia(s), {log.get('deleted_files', '?')} archivos)\n"
                                 else:
-                                    logs_msg += f"├ {log['timestamp']} - @{log['username']}: {log['filename']} (de: {log['evidence_name']})\n"
+                                    logs_msg += f"├ {log['timestamp']} - @{log['username']}: {log['filename']}\n"
                         
                         if len(logs_msg) > 4000:
                             logs_msg = logs_msg[:4000] + "\n\n⚠️ Logs truncados (demasiados)"
@@ -2232,6 +2232,7 @@ if __name__ == '__main__':
         main()
     except:
         main()
+
 
 
 
