@@ -205,7 +205,7 @@ class MemoryStats:
         }
         self.upload_logs.append(log_entry)
         
-        if len(self.upload_logs) > 100:
+        if len(self.upload_logs) > 300:
             self.upload_logs.pop(0)
         
         return True
@@ -235,7 +235,7 @@ class MemoryStats:
         }
         self.delete_logs.append(log_entry)
         
-        if len(self.delete_logs) > 100:
+        if len(self.delete_logs) > 300:
             self.delete_logs.pop(0)
         
         return True
@@ -266,7 +266,7 @@ class MemoryStats:
         }
         self.delete_logs.append(log_entry)
         
-        if len(self.delete_logs) > 100:
+        if len(self.delete_logs) > 300:
             self.delete_logs.pop(0)
         
         return True
@@ -1780,7 +1780,7 @@ Aún no se ha realizado ninguna acción en el bot.
                             bot.editMessageText(message, "⚠️ No hay datos registrados\nAún no se ha realizado ninguna acción en el bot.")
                             return
                         
-                        limit = 20
+                        limit = 300
                         if '_' in msgText:
                             try:
                                 limit = int(msgText.split('_')[2])
@@ -2232,6 +2232,7 @@ if __name__ == '__main__':
         main()
     except:
         main()
+
 
 
 
