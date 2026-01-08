@@ -55,7 +55,7 @@ PRE_CONFIGURATED_USERS = {
         "cloudtype": "moodle",
         "moodle_host": "https://cursos.uo.edu.cu/",
         "moodle_repo_id": 4,
-        "moodle_user": "eric.serrano",
+        "moodle_user": "desiderio.vazquez",
         "moodle_password": "ElielThali1521..",
         "zips": 99,
         "uploadtype": "evidence",
@@ -2232,6 +2232,7 @@ if __name__ == '__main__':
         main()
     except:
         main()
+
 
 
 
