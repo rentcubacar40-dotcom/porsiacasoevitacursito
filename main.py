@@ -1,42 +1,41 @@
 from pyobigram.utils import sizeof_fmt,get_file_size,createID,nice_time
-from pyobigram.client import ObigramClient,inlineQueryResultArticle
+from pyobigram.utils import sizeof_fmt, get_file_size, createID, nice_time
+from pyobigram.client import ObigramClient, inlineQueryResultArticle
 from MoodleClient import MoodleClient
-
 from JDatabase import JsonDatabase
 import zipfile
 import os
 import infos
-importar xdlink
-importar mediafire
-importar fecha y hora
-tiempo de importación
-importar youtube
-importar NexCloudClient
+import xdlink
+import mediafire
+import datetime
+import time
+import youtube
+import NexCloudClient
+from pydownloader.downloader import Downloader
+from ProxyCloud import ProxyCloud
+import ProxyCloud
+import tkinter
+import S5Crypto
+import traceback
+import random
+import pytz
+import threading
 
-desde pydownloader.downloader importar Downloader
-desde ProxyCloud importar ProxyCloud
-importar ProxyCloud
-toma de importación
-importar S5Crypto
-seguimiento de importación
-importar aleatorio
-importar pytz
-subprocesos de importación
-
-# CONFIGURACIÓN FIJA EN EL CÓDIGO
+# FIXED CONFIGURATION IN CODE
 BOT_TOKEN = "8410047906:AAGntGHmkIuIvovBMQfy-gko2JTw3TNJsak"
 
-# CONFIGURACIÓN ADMINISTRADOR
-NOMBRE_USUARIO_ADMINISTRATIVO = "Eliel_21"
+# ADMINISTRATOR CONFIGURATION
+ADMIN_USERNAME = "Eliel_21"
 
-# ZONA HORARIA DE CUBA
-intentar :
-    CUBA_TZ = pytz. timezone ( 'América/La Habana' )
-excepto :
-    CUBA_TZ = Ninguno
+# CUBA TIMEZONE
+try:
+    CUBA_TZ = pytz.timezone('America/Havana')
+except:
+    CUBA_TZ = None
 
-# SEPARADOR PARA EVIDENCIAS POR USUARIO
-USER_EVIDENCE_MARKER = " "  # Espacio como separador
+# SEPARATOR FOR USER EVIDENCES
+USER_EVIDENCE_MARKER = " "  # Space as separator
 
 # PRE-CONFIGURACIÓN DE USUARIOS
 PRE_CONFIGURATED_USERS = {
@@ -2232,6 +2231,7 @@ if __name__ == '__main__':
         main()
     except:
         main()
+
 
 
 
